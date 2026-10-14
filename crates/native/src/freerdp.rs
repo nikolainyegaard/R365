@@ -74,7 +74,8 @@ fn find_on_path(name: &str) -> Option<PathBuf> {
 }
 
 fn inspect(path: PathBuf) -> FreeRdp {
-    let version = Command::new(&path).arg("/version").output().ok().and_then(|o| extract_version(&String::from_utf8_lossy(&o.stdout))).unwrap_or_default();
+    let version =
+        Command::new(&path).arg("/version").output().ok().and_then(|o| extract_version(&String::from_utf8_lossy(&o.stdout))).unwrap_or_default();
     FreeRdp { path: Some(path), version }
 }
 
@@ -85,10 +86,12 @@ fn flatpak() -> Option<FreeRdp> {
 
 /// "3.32.1" out of "This is FreeRDP version 3.32.1 (n/a)" or a Flatpak "Version: 3.32.1" line.
 fn extract_version(text: &str) -> Option<String> {
-    text.split(|c: char| c.is_whitespace() || c == '(' || c == ')').find(|w| {
-        let w = w.trim_start_matches('v');
-        w.split('.').count() >= 2 && w.split('.').all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
-    }).map(|w| w.trim_start_matches('v').to_string())
+    text.split(|c: char| c.is_whitespace() || c == '(' || c == ')')
+        .find(|w| {
+            let w = w.trim_start_matches('v');
+            w.split('.').count() >= 2 && w.split('.').all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+        })
+        .map(|w| w.trim_start_matches('v').to_string())
 }
 
 /// Writes the SDL client key bindings once (F12 disconnect, F11 minimise, F10 fullscreen) so
@@ -133,7 +136,10 @@ impl Session {
     pub fn submit_redirect(&self, url: &str) -> crate::Result<()> {
         let mut guard = self.stdin.lock().map_err(|_| "Session input is poisoned".to_string())?;
         let stdin = guard.as_mut().ok_or_else(|| "Session is no longer accepting input".to_string())?;
-        stdin.write_all(format!("{}\n", url.trim()).as_bytes()).and_then(|()| stdin.flush()).map_err(|e| format!("Could not pass the sign-in result to FreeRDP: {e}"))
+        stdin
+            .write_all(format!("{}\n", url.trim()).as_bytes())
+            .and_then(|()| stdin.flush())
+            .map_err(|e| format!("Could not pass the sign-in result to FreeRDP: {e}"))
     }
 
     pub fn stop(&self) {
@@ -146,7 +152,15 @@ impl Session {
 
 /// Starts FreeRDP for one resource. Events arrive on `tx` tagged with `key` from a reader
 /// thread until the process exits.
-pub fn launch(freerdp: &FreeRdp, rdp_file: &Path, username: &str, title: &str, opts: &LaunchOptions, key: String, tx: Sender<(String, SessionEvent)>) -> crate::Result<Session> {
+pub fn launch(
+    freerdp: &FreeRdp,
+    rdp_file: &Path,
+    username: &str,
+    title: &str,
+    opts: &LaunchOptions,
+    key: String,
+    tx: Sender<(String, SessionEvent)>,
+) -> crate::Result<Session> {
     ensure_sdl_config();
     let args = rdp::build_args(&rdp_file.to_string_lossy(), username, title, opts)?;
     let argv = freerdp.argv(args);
@@ -177,7 +191,12 @@ pub fn launch(freerdp: &FreeRdp, rdp_file: &Path, username: &str, title: &str, o
     let stderr = child.stderr.take();
     let stdin = child.stdin.take();
     let log_file = crate::paths::logs_dir().join(format!("session_{}_{}.log", sanitize(&key), crate::now_unix()));
-    let session = Session { child: Arc::new(Mutex::new(child)), stdin: Arc::new(Mutex::new(stdin)), user_stopped: Arc::new(AtomicBool::new(false)), log_file: log_file.clone() };
+    let session = Session {
+        child: Arc::new(Mutex::new(child)),
+        stdin: Arc::new(Mutex::new(stdin)),
+        user_stopped: Arc::new(AtomicBool::new(false)),
+        log_file: log_file.clone(),
+    };
     let _ = tx.send((key.clone(), SessionEvent::Status(SessionStatus::Connecting, format!("Connecting to {title}"))));
     if let Some(err) = stderr {
         std::thread::spawn(move || for _ in BufReader::new(err).lines() {});
@@ -197,7 +216,7 @@ fn watch(session: Session, stdout: std::process::ChildStdout, log_file: &Path, t
     let mut log_line = |line: &str| {
         if let Some(f) = log.as_mut() {
             let redacted = rdp::redact(line);
-            if written + redacted.len() as u64 + 1 <= MAX_LOG_BYTES {
+            if written + (redacted.len() as u64) < MAX_LOG_BYTES {
                 let _ = writeln!(f, "{redacted}");
                 written += redacted.len() as u64 + 1;
             }
@@ -221,7 +240,11 @@ fn watch(session: Session, stdout: std::process::ChildStdout, log_file: &Path, t
     let code = session.child.lock().ok().and_then(|mut c| c.wait().ok()).and_then(|s| s.code()).unwrap_or(-1);
     log_line(&format!("=== exited with code {code} ==="));
     let clean = session.user_stopped.load(Ordering::SeqCst) || matches!(code, 0 | 129 | 130 | 143);
-    let status = if clean { (SessionStatus::Disconnected, "Session disconnected".to_string()) } else { (SessionStatus::Failed, format!("Session exited with code {code}")) };
+    let status = if clean {
+        (SessionStatus::Disconnected, "Session disconnected".to_string())
+    } else {
+        (SessionStatus::Failed, format!("Session exited with code {code}"))
+    };
     let _ = tx.send((key.clone(), SessionEvent::Status(status.0, status.1)));
     let _ = tx.send((key, SessionEvent::Exited(code)));
     crate::paths::prune_logs(10);

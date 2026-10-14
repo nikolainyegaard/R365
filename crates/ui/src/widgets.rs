@@ -20,9 +20,21 @@ pub fn button_sized(ui: &mut Ui, text: &str, kind: Kind, min_width: f32, height:
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
     let (hovered, pressed) = (resp.hovered(), resp.is_pointer_button_down_on());
     let (fill, stroke, fg) = match kind {
-        Kind::Primary => (if pressed { t::BLUE_PRESSED } else if hovered { t::BLUE_HOVER } else { t::BLUE }, Color32::TRANSPARENT, Color32::WHITE),
+        Kind::Primary => (
+            if pressed {
+                t::BLUE_PRESSED
+            } else if hovered {
+                t::BLUE_HOVER
+            } else {
+                t::BLUE
+            },
+            Color32::TRANSPARENT,
+            Color32::WHITE,
+        ),
         Kind::Secondary => (if hovered { t::CARD_HOVER } else { t::CARD }, if hovered { t::TEXT_SECONDARY } else { t::BORDER }, t::TEXT),
-        Kind::Ghost => (if hovered { t::CARD } else { Color32::TRANSPARENT }, Color32::TRANSPARENT, if hovered { t::TEXT } else { t::TEXT_SECONDARY }),
+        Kind::Ghost => {
+            (if hovered { t::CARD } else { Color32::TRANSPARENT }, Color32::TRANSPARENT, if hovered { t::TEXT } else { t::TEXT_SECONDARY })
+        }
     };
     ui.painter().rect(rect, CornerRadius::same(t::RADIUS), fill, Stroke::new(1.0, stroke), StrokeKind::Inside);
     ui.painter().galley(rect.center() - galley.size() / 2.0, galley, fg);

@@ -3,9 +3,9 @@
 use crate::app::{App, Tone, VERSION};
 use crate::theme::{self as t};
 use crate::widgets::{self, Kind};
+use egui::{Align, Align2, CornerRadius, Frame, Layout, Margin, RichText, Sense, Stroke, StrokeKind, Ui, UiBuilder, vec2};
 use r365_core::feed::Resource;
 use r365_core::rdp::{DisplayMode, SessionStatus};
-use egui::{Align, Align2, CornerRadius, Frame, Layout, Margin, RichText, Sense, Stroke, StrokeKind, Ui, UiBuilder, vec2};
 
 enum CardAction {
     None,
@@ -78,7 +78,8 @@ fn sign_in(app: &mut App, root: &mut Ui) {
         card.add_space(8.0);
         card.horizontal(|ui| {
             let w = ui.available_width();
-            let galley_w = ui.painter().layout_no_wrap(app.status.clone(), egui::FontId::proportional(12.0), t::TEXT).size().x + if app.signing_in { 24.0 } else { 0.0 };
+            let galley_w = ui.painter().layout_no_wrap(app.status.clone(), egui::FontId::proportional(12.0), t::TEXT).size().x
+                + if app.signing_in { 24.0 } else { 0.0 };
             ui.add_space(((w - galley_w) / 2.0).max(0.0));
             if app.signing_in {
                 ui.add(egui::Spinner::new().size(16.0).color(t::BLUE));
@@ -90,61 +91,74 @@ fn sign_in(app: &mut App, root: &mut Ui) {
 }
 
 fn header(app: &mut App, root: &mut Ui) {
-    egui::Panel::top("header").show_separator_line(false).frame(Frame::new().fill(t::SURFACE).inner_margin(Margin::symmetric(20, 12))).show(root, |ui| {
-        let line = ui.max_rect();
-        ui.painter().hline(line.x_range(), line.bottom() + 12.0, t::hairline());
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 12.0;
-            widgets::strong(ui, "R365", 18.0, t::TEXT);
-            widgets::badge(ui, "Cloud PC", t::BADGE_BRAND);
-            let search_w = (ui.available_width() - 520.0).clamp(120.0, 260.0);
-            ui.add_sized([search_w, t::CONTROL_H], egui::TextEdit::singleline(&mut app.search).hint_text("Search Cloud PCs and apps").margin(Margin::symmetric(10, 7)));
-            if widgets::button(ui, "Refresh", Kind::Secondary, 0.0).clicked() {
-                app.refresh_workspaces();
-            }
-            if app.loading {
-                ui.add(egui::Spinner::new().size(16.0).color(t::BLUE));
-            }
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                if widgets::button(ui, "Sign out", Kind::Ghost, 0.0).clicked() {
-                    app.confirm_sign_out = true;
+    egui::Panel::top("header").show_separator_line(false).frame(Frame::new().fill(t::SURFACE).inner_margin(Margin::symmetric(20, 12))).show(
+        root,
+        |ui| {
+            let line = ui.max_rect();
+            ui.painter().hline(line.x_range(), line.bottom() + 12.0, t::hairline());
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 12.0;
+                widgets::strong(ui, "R365", 18.0, t::TEXT);
+                widgets::badge(ui, "Cloud PC", t::BADGE_BRAND);
+                let search_w = (ui.available_width() - 520.0).clamp(120.0, 260.0);
+                ui.add_sized(
+                    [search_w, t::CONTROL_H],
+                    egui::TextEdit::singleline(&mut app.search).hint_text("Search Cloud PCs and apps").margin(Margin::symmetric(10, 7)),
+                );
+                if widgets::button(ui, "Refresh", Kind::Secondary, 0.0).clicked() {
+                    app.refresh_workspaces();
                 }
-                if widgets::button(ui, "Settings", Kind::Ghost, 0.0).clicked() {
-                    app.settings_draft = Some(app.config.clone());
+                if app.loading {
+                    ui.add(egui::Spinner::new().size(16.0).color(t::BLUE));
                 }
-                let identity = app.tokens.as_ref().map(|t| t.claims.display_identity()).unwrap_or_default();
-                widgets::pill(ui, &identity);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    if widgets::button(ui, "Sign out", Kind::Ghost, 0.0).clicked() {
+                        app.confirm_sign_out = true;
+                    }
+                    if widgets::button(ui, "Settings", Kind::Ghost, 0.0).clicked() {
+                        app.settings_draft = Some(app.config.clone());
+                    }
+                    let identity = app.tokens.as_ref().map(|t| t.claims.display_identity()).unwrap_or_default();
+                    widgets::pill(ui, &identity);
+                });
             });
-        });
-    });
+        },
+    );
 }
 
 fn status_bar(app: &mut App, root: &mut Ui) {
-    egui::Panel::bottom("status").show_separator_line(false).frame(Frame::new().fill(t::SURFACE).inner_margin(Margin::symmetric(20, 8))).show(root, |ui| {
-        let line = ui.max_rect();
-        ui.painter().hline(line.x_range(), line.top() - 8.0, t::hairline());
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 16.0;
-            widgets::text(ui, &format!("v{VERSION}"), 11.0, t::TEXT_SECONDARY);
-            let n = app.resource_count();
-            widgets::text(ui, &format!("{n} resource{}", if n == 1 { "" } else { "s" }), 11.0, t::TEXT_SECONDARY);
-            if app.any_session_busy() {
-                ui.add(egui::Spinner::new().size(12.0).color(t::INFO));
-            }
-            widgets::text(ui, &app.status, 11.0, tone_color(app.tone));
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let synced = match app.last_sync {
-                    None => "Not synced".to_string(),
-                    Some(at) if at.elapsed().as_secs() < 60 => "Synced just now".to_string(),
-                    Some(at) => format!("Synced {}m ago", at.elapsed().as_secs() / 60),
-                };
-                widgets::text(ui, &synced, 11.0, t::TEXT_SECONDARY);
-                let engine = app.freerdp.as_ref().map(|f| format!("RDP engine: {}", f.display_name())).unwrap_or_else(|| "RDP engine: not detected (FreeRDP required)".into());
-                widgets::text(ui, &engine, 11.0, if app.freerdp.is_some() { t::TEXT_SECONDARY } else { t::ERROR_TEXT });
+    egui::Panel::bottom("status").show_separator_line(false).frame(Frame::new().fill(t::SURFACE).inner_margin(Margin::symmetric(20, 8))).show(
+        root,
+        |ui| {
+            let line = ui.max_rect();
+            ui.painter().hline(line.x_range(), line.top() - 8.0, t::hairline());
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 16.0;
+                widgets::text(ui, &format!("v{VERSION}"), 11.0, t::TEXT_SECONDARY);
+                let n = app.resource_count();
+                widgets::text(ui, &format!("{n} resource{}", if n == 1 { "" } else { "s" }), 11.0, t::TEXT_SECONDARY);
+                if app.any_session_busy() {
+                    ui.add(egui::Spinner::new().size(12.0).color(t::INFO));
+                }
+                widgets::text(ui, &app.status, 11.0, tone_color(app.tone));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let synced = match app.last_sync {
+                        None => "Not synced".to_string(),
+                        Some(at) if at.elapsed().as_secs() < 60 => "Synced just now".to_string(),
+                        Some(at) => format!("Synced {}m ago", at.elapsed().as_secs() / 60),
+                    };
+                    widgets::text(ui, &synced, 11.0, t::TEXT_SECONDARY);
+                    let engine = app
+                        .freerdp
+                        .as_ref()
+                        .map(|f| format!("RDP engine: {}", f.display_name()))
+                        .unwrap_or_else(|| "RDP engine: not detected (FreeRDP required)".into());
+                    widgets::text(ui, &engine, 11.0, if app.freerdp.is_some() { t::TEXT_SECONDARY } else { t::ERROR_TEXT });
+                });
             });
-        });
-    });
+        },
+    );
 }
 
 fn grid(app: &mut App, root: &mut Ui) {
@@ -155,7 +169,16 @@ fn grid(app: &mut App, root: &mut Ui) {
             let mut matched = 0;
             let workspaces = app.workspaces.clone();
             for ws in &workspaces {
-                let shown: Vec<&Resource> = ws.resources.iter().filter(|r| query.is_empty() || r.title.to_lowercase().contains(&query) || r.subtitle().to_lowercase().contains(&query) || r.id.to_lowercase().contains(&query)).collect();
+                let shown: Vec<&Resource> = ws
+                    .resources
+                    .iter()
+                    .filter(|r| {
+                        query.is_empty()
+                            || r.title.to_lowercase().contains(&query)
+                            || r.subtitle().to_lowercase().contains(&query)
+                            || r.id.to_lowercase().contains(&query)
+                    })
+                    .collect();
                 if shown.is_empty() {
                     continue;
                 }
@@ -226,7 +249,13 @@ fn card(ui: &mut Ui, r: &Resource, status: SessionStatus) -> CardAction {
     let size = vec2(220.0, 206.0);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
     let hovered = resp.hovered() || ui.rect_contains_pointer(rect);
-    ui.painter().rect(rect, CornerRadius::same(t::CARD_RADIUS), if hovered { t::CARD_HOVER } else { t::CARD }, Stroke::new(1.0, if hovered { t::FOCUS } else { t::BORDER }), StrokeKind::Inside);
+    ui.painter().rect(
+        rect,
+        CornerRadius::same(t::CARD_RADIUS),
+        if hovered { t::CARD_HOVER } else { t::CARD },
+        Stroke::new(1.0, if hovered { t::FOCUS } else { t::BORDER }),
+        StrokeKind::Inside,
+    );
     let inner = rect.shrink(14.0);
     let mut c = ui.new_child(UiBuilder::new().max_rect(inner).layout(Layout::top_down(Align::Center)));
     c.spacing_mut().item_spacing.y = 6.0;
@@ -263,7 +292,11 @@ fn card(ui: &mut Ui, r: &Resource, status: SessionStatus) -> CardAction {
     }
     resp.context_menu(|ui| {
         ui.set_min_width(200.0);
-        let items: [(&str, CardAction); 3] = [("Connect (fullscreen)", CardAction::Connect(DisplayMode::Fullscreen)), ("Connect (windowed)", CardAction::Connect(DisplayMode::Windowed)), ("Connect (multi-monitor)", CardAction::Connect(DisplayMode::MultiMonitor))];
+        let items: [(&str, CardAction); 3] = [
+            ("Connect (fullscreen)", CardAction::Connect(DisplayMode::Fullscreen)),
+            ("Connect (windowed)", CardAction::Connect(DisplayMode::Windowed)),
+            ("Connect (multi-monitor)", CardAction::Connect(DisplayMode::MultiMonitor)),
+        ];
         for (label, a) in items {
             if ui.button(label).clicked() {
                 action = a;
@@ -336,7 +369,11 @@ fn settings_window(app: &mut App, ctx: &egui::Context) {
         });
         ui.add_space(6.0);
         widgets::text(ui, "FREERDP", 11.0, t::TEXT_MUTED);
-        ui.add(egui::TextEdit::singleline(&mut draft.freerdp_path).hint_text("Detect automatically, or a binary path, or \"flatpak\"").desired_width(f32::INFINITY));
+        ui.add(
+            egui::TextEdit::singleline(&mut draft.freerdp_path)
+                .hint_text("Detect automatically, or a binary path, or \"flatpak\"")
+                .desired_width(f32::INFINITY),
+        );
         let detected = app.freerdp.as_ref().map(|f| f.display_name()).unwrap_or_else(|| "none detected".into());
         widgets::text(ui, &format!("Detected: {detected}"), 11.0, t::TEXT_MUTED);
         let mut extra = draft.extra_args.join(" ");
@@ -368,9 +405,23 @@ fn session_auth_window(app: &mut App, ctx: &egui::Context) {
     let mut reopen = false;
     dialog(ctx, &title, 520.0, |ui| {
         ui.spacing_mut().item_spacing.y = 10.0;
-        widgets::text(ui, "FreeRDP needs a one-time Entra ID sign-in for this session. A browser window has opened. Sign in there, then copy the address of the page you land on and paste it below.", 13.0, t::TEXT_SECONDARY);
-        widgets::text(ui, "The page will look blank or say the site cannot be reached; that is expected. Only the address matters.", 11.0, t::TEXT_MUTED);
-        let edit = ui.add(egui::TextEdit::singleline(&mut pending.paste).hint_text("https://login.microsoftonline.com/common/oauth2/nativeclient?code=...").desired_width(f32::INFINITY));
+        widgets::text(
+            ui,
+            "FreeRDP needs a one-time Entra ID sign-in for this session. A browser window has opened. Sign in there, then copy the address of the page you land on and paste it below.",
+            13.0,
+            t::TEXT_SECONDARY,
+        );
+        widgets::text(
+            ui,
+            "The page will look blank or say the site cannot be reached; that is expected. Only the address matters.",
+            11.0,
+            t::TEXT_MUTED,
+        );
+        let edit = ui.add(
+            egui::TextEdit::singleline(&mut pending.paste)
+                .hint_text("https://login.microsoftonline.com/common/oauth2/nativeclient?code=...")
+                .desired_width(f32::INFINITY),
+        );
         if edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
             submit = true;
         }

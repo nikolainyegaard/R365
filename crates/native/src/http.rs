@@ -43,7 +43,8 @@ impl Http {
 
     /// GET with an optional bearer token, following up to five redirects inside Microsoft hosts.
     pub fn get(&self, url: &str, bearer: Option<&str>, accept: Option<&str>, limit: usize) -> crate::Result<Response> {
-        let mut current = r365_core::feed::allowed_url(url.to_string()).ok_or_else(|| format!("Refusing to request a non-Microsoft address: {url}"))?;
+        let mut current =
+            r365_core::feed::allowed_url(url.to_string()).ok_or_else(|| format!("Refusing to request a non-Microsoft address: {url}"))?;
         let origin = origin_of(&current);
         for _ in 0..=MAX_REDIRECTS {
             let mut req = self.agent.get(&current).header("X-MS-User-Agent", r365_core::feed::USER_AGENT);

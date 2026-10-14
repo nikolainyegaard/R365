@@ -100,8 +100,7 @@ mod tests {
         let c = ClientConfig::default();
         assert!(c.launch_options(DisplayMode::MultiMonitor).fullscreen);
         assert!(!c.launch_options(DisplayMode::Windowed).fullscreen);
-        let mut f = ClientConfig::default();
-        f.fullscreen = true;
+        let f = ClientConfig { fullscreen: true, ..Default::default() };
         assert!(f.launch_options(DisplayMode::Default).fullscreen);
         assert!(!f.launch_options(DisplayMode::Windowed).fullscreen);
     }

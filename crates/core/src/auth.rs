@@ -195,12 +195,7 @@ impl TokenSet {
             .refresh_token
             .or_else(|| previous.map(|p| p.refresh_token.clone()))
             .ok_or_else(|| "Microsoft did not return a refresh token; offline_access may be blocked by policy".to_string())?;
-        let claims = resp
-            .id_token
-            .as_deref()
-            .and_then(parse_id_token)
-            .or_else(|| previous.map(|p| p.claims.clone()))
-            .unwrap_or_default();
+        let claims = resp.id_token.as_deref().and_then(parse_id_token).or_else(|| previous.map(|p| p.claims.clone())).unwrap_or_default();
         Ok(TokenSet { access_token: resp.access_token, refresh_token, expires_at: now.saturating_add(resp.expires_in), claims })
     }
 

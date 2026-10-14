@@ -113,7 +113,8 @@ pub fn parse_feed(xml: &str, tenant: &TenantFeed) -> crate::Result<Workspace> {
         let id = attr(node, &["ID"]).unwrap_or_else(|| format!("resource-{}", resources.len() + 1));
         let title = attr(node, &["Title", "Name"]).unwrap_or_else(|| id.clone());
         let rdp_url = child_url(node, &["ResourceFile"], &["URL", "href"]);
-        let icon_url = child_url(node, &["Icon64", "Icon48", "Icon32", "Icon128", "Icon256", "Icon16", "Icon", "IconRaw"], &["FileURL", "URL", "href", "src"]);
+        let icon_url =
+            child_url(node, &["Icon64", "Icon48", "Icon32", "Icon128", "Icon256", "Icon16", "Icon", "IconRaw"], &["FileURL", "URL", "href", "src"]);
         resources.push(Resource {
             id,
             title,

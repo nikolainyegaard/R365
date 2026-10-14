@@ -9,9 +9,9 @@ use r365_native::freerdp::{FreeRdp, Session, SessionEvent};
 use r365_native::http::Http;
 use r365_native::{auth, browser, feed, freerdp, paths, secret};
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -167,7 +167,14 @@ impl App {
                 self.last_sync = Some(Instant::now());
                 self.workspaces = ws;
                 let n = self.resource_count();
-                self.set_status(if n == 0 { "No Cloud PCs or apps are published to you".into() } else { format!("{n} resource{} available", if n == 1 { "" } else { "s" }) }, Tone::Neutral);
+                self.set_status(
+                    if n == 0 {
+                        "No Cloud PCs or apps are published to you".into()
+                    } else {
+                        format!("{n} resource{} available", if n == 1 { "" } else { "s" })
+                    },
+                    Tone::Neutral,
+                );
             }
             Msg::Workspaces(Err(e)) => {
                 self.loading = false;
@@ -300,7 +307,8 @@ impl App {
         let key = resource.key();
         let Some(freerdp) = self.freerdp.clone() else {
             self.statuses.insert(key, SessionStatus::Failed);
-            self.error_dialog = Some("FreeRDP was not found. Install the freerdp package (or the com.freerdp.FreeRDP Flatpak), or set its path in Settings.".into());
+            self.error_dialog =
+                Some("FreeRDP was not found. Install the freerdp package (or the com.freerdp.FreeRDP Flatpak), or set its path in Settings.".into());
             return;
         };
         let Some(tokens) = self.tokens.clone() else { return };

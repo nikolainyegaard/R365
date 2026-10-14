@@ -1,7 +1,8 @@
 //! The desktop shell: one eframe window around r365_ui::App.
 
 fn main() -> eframe::Result {
-    let viewport = egui::ViewportBuilder::default().with_title("R365").with_app_id("r365").with_inner_size([1050.0, 720.0]).with_min_inner_size([750.0, 550.0]);
+    let viewport =
+        egui::ViewportBuilder::default().with_title("R365").with_app_id("r365").with_inner_size([1050.0, 720.0]).with_min_inner_size([750.0, 550.0]);
     let options = eframe::NativeOptions { viewport, renderer: eframe::Renderer::Glow, centered: true, ..Default::default() };
     eframe::run_native(
         "R365",

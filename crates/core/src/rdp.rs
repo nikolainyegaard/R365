@@ -146,9 +146,22 @@ fn strip_ansi(s: &str) -> String {
 
 pub fn is_connected_marker(line: &str) -> bool {
     let l = line.to_ascii_lowercase();
-    ["logon info", "logoninfov", "channelconnected", "tsg_state_connected", "displaycontrolcapspdu", "sdl_event_window_shown", "successfully connected", "postconnect", "demand_active", "connection_state_active", "handleshow", "activated"]
-        .iter()
-        .any(|m| l.contains(m))
+    [
+        "logon info",
+        "logoninfov",
+        "channelconnected",
+        "tsg_state_connected",
+        "displaycontrolcapspdu",
+        "sdl_event_window_shown",
+        "successfully connected",
+        "postconnect",
+        "demand_active",
+        "connection_state_active",
+        "handleshow",
+        "activated",
+    ]
+    .iter()
+    .any(|m| l.contains(m))
 }
 
 pub fn is_reconnecting_marker(line: &str) -> bool {
