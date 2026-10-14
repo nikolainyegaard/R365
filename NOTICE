@@ -1,0 +1,11 @@
+R365
+Copyright 2026 Nikolai Nyegaard
+
+Licensed under the Apache License, Version 2.0.
+
+This product includes logic derived from JW365 (https://github.com/alaurie/JW365),
+Copyright alaurie, licensed under the Apache License, Version 2.0:
+the FreeRDP argument list and .rdp profile adjustments (crates/core/src/rdp.rs),
+the workspace feed element and attribute names and the Microsoft host allowlist
+(crates/core/src/feed.rs), and the FreeRDP child environment and SDL key bindings
+(crates/native/src/freerdp.rs).

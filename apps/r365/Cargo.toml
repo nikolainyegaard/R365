@@ -1,0 +1,16 @@
+[package]
+name = "r365"
+description = "Windows 365 and Azure Virtual Desktop client for Linux"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+r365-ui = { workspace = true }
+egui = { workspace = true }
+eframe = { workspace = true, features = ["default_fonts", "glow", "wayland", "x11"] }
+
+[lints]
+workspace = true

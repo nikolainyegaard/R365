@@ -1,0 +1,37 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+rust-version = "1.90"
+repository = "https://github.com/nikolainyegaard/R365"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+unimplemented = "deny"
+todo = "deny"
+unreachable = "deny"
+indexing_slicing = "deny"
+
+[workspace.dependencies]
+r365-core = { path = "crates/core" }
+r365-native = { path = "crates/native" }
+r365-ui = { path = "crates/ui" }
+egui = "0.36"
+eframe = { version = "0.36", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"

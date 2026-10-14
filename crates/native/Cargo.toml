@@ -1,0 +1,17 @@
+[package]
+name = "r365-native"
+description = "Desktop-only side of R365: HTTPS, keyring, XDG paths, FreeRDP discovery and supervision"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+r365-core = { workspace = true }
+serde_json = { workspace = true }
+# HTTPS over rustls with the OS trust store (platform-verifier); no bundled root list.
+ureq = { version = "3.4", default-features = false, features = ["rustls-no-provider", "_ring", "platform-verifier"] }
+
+[lints]
+workspace = true

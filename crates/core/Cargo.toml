@@ -1,0 +1,16 @@
+[package]
+name = "r365-core"
+description = "Pure logic for R365: Entra ID token handling, workspace feed parsing, FreeRDP arguments"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+roxmltree = "0.21"
+
+[lints]
+workspace = true

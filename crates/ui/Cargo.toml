@@ -1,0 +1,16 @@
+[package]
+name = "r365-ui"
+description = "The egui views, theme and app state of R365"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+r365-core = { workspace = true }
+r365-native = { workspace = true }
+egui = { workspace = true }
+
+[lints]
+workspace = true
