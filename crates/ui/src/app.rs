@@ -175,6 +175,7 @@ impl App {
         match msg {
             Msg::SignedIn(Ok(tokens)) => {
                 self.sign_in = None;
+                self.attention();
                 self.tokens = Some(tokens);
                 self.set_status("Signed in", Tone::Neutral);
                 self.refresh_workspaces();
@@ -218,6 +219,9 @@ impl App {
     fn handle_session(&mut self, key: String, event: SessionEvent) {
         match event {
             SessionEvent::Status(status, message) => {
+                if status == SessionStatus::Failed {
+                    self.attention();
+                }
                 let tone = match status {
                     SessionStatus::Failed => Tone::Error,
                     s if s.is_busy() => Tone::Active,
@@ -242,6 +246,12 @@ impl App {
 
     fn title_of(&self, key: &str) -> String {
         self.workspaces.iter().flat_map(|w| &w.resources).find(|r| r.key() == key).map(|r| r.title.clone()).unwrap_or_else(|| "Cloud PC".into())
+    }
+
+    /// Highlights R365 in the task bar: after a browser hand-off the window is behind the browser
+    /// and Wayland will not let it raise itself.
+    fn attention(&self) {
+        self.ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
     }
 
     fn spawn<F: FnOnce() + Send + 'static>(&self, f: F) {
