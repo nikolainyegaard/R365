@@ -32,7 +32,7 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
     session_auth_window(app, ctx);
     sign_out_dialog(app, ctx);
     error_dialog(app, ctx);
-    if app.loading || app.signing_in || app.any_session_busy() {
+    if app.loading || app.signing_in() || app.any_session_busy() {
         ctx.request_repaint_after(std::time::Duration::from_millis(250));
     }
 }
@@ -40,7 +40,7 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
 fn sign_in(app: &mut App, root: &mut Ui) {
     egui::CentralPanel::default().frame(Frame::new().fill(t::CANVAS)).show(root, |ui| {
         let card_w = 440.0_f32.min(ui.available_width() - 40.0);
-        let card_h = if app.device_code.is_some() { 420.0 } else { 330.0 };
+        let card_h = if app.sign_in.is_some() { 400.0 } else { 330.0 };
         let rect = egui::Rect::from_center_size(ui.max_rect().center(), vec2(card_w, card_h));
         ui.painter().rect(rect, CornerRadius::same(16), t::CARD, t::hairline(), StrokeKind::Inside);
         let mut card = ui.new_child(UiBuilder::new().max_rect(rect.shrink(36.0)).layout(Layout::top_down(Align::Center)));
@@ -49,24 +49,39 @@ fn sign_in(app: &mut App, root: &mut Ui) {
         widgets::badge(&mut card, "Windows 365 & AVD for Linux", t::BADGE_BRAND);
         widgets::text(&mut card, "Connect to your Cloud PCs and virtual desktops from Linux", 13.0, t::TEXT_SECONDARY);
         card.add_space(10.0);
-        if let Some(code) = app.device_code.clone() {
-            widgets::text(&mut card, "Enter this code in the browser window that opened:", 12.0, t::TEXT_SECONDARY);
-            card.label(RichText::new(&code.user_code).size(30.0).monospace().strong().color(t::TEXT));
-            let short_uri = code.verification_uri.trim_start_matches("https://").to_string();
-            widgets::text(&mut card, &short_uri, 12.0, t::TEXT_MUTED);
+        if let Some(sign_in) = app.sign_in.as_mut() {
+            let (lead, hint) = if app.handler_ready {
+                (
+                    "Finish signing in in the browser window that opened. If the browser asks, let it open the link with R365.",
+                    "If nothing happens after sign-in, paste the address the browser ends on:",
+                )
+            } else {
+                ("Finish signing in in the browser window that opened.", "Then copy the address of the page you land on and paste it here:")
+            };
+            card.add(egui::Label::new(RichText::new(lead).size(12.0).color(t::TEXT_SECONDARY)).wrap());
+            widgets::text(&mut card, hint, 11.0, t::TEXT_MUTED);
+            let edit = card.add(egui::TextEdit::singleline(&mut sign_in.paste).hint_text("...?code=...&state=...").desired_width(f32::INFINITY));
+            let submit_key = edit.lost_focus() && card.input(|i| i.key_pressed(egui::Key::Enter));
             card.add_space(6.0);
+            let mut action: Option<u8> = if submit_key { Some(0) } else { None };
             card.horizontal(|ui| {
                 ui.add_space((ui.available_width() - 3.0 * 118.0 - 16.0).max(0.0) / 2.0);
-                if widgets::button(ui, "Copy code", Kind::Secondary, 118.0).clicked() {
-                    ui.ctx().copy_text(code.user_code.clone());
+                if widgets::button(ui, "Continue", Kind::Primary, 118.0).clicked() {
+                    action = Some(0);
                 }
                 if widgets::button(ui, "Open browser", Kind::Secondary, 118.0).clicked() {
-                    let _ = r365_native::browser::open(&code.verification_uri);
+                    action = Some(1);
                 }
                 if widgets::button(ui, "Cancel", Kind::Ghost, 118.0).clicked() {
-                    app.cancel_sign_in();
+                    action = Some(2);
                 }
             });
+            match action {
+                Some(0) => app.submit_pasted(),
+                Some(1) => app.reopen_sign_in(),
+                Some(2) => app.cancel_sign_in(),
+                _ => {}
+            }
         } else {
             if widgets::button_sized(&mut card, "Sign in with Microsoft", Kind::Primary, 280.0, 44.0, 14.0).clicked() {
                 app.start_sign_in();
@@ -79,9 +94,9 @@ fn sign_in(app: &mut App, root: &mut Ui) {
         card.horizontal(|ui| {
             let w = ui.available_width();
             let galley_w = ui.painter().layout_no_wrap(app.status.clone(), egui::FontId::proportional(12.0), t::TEXT).size().x
-                + if app.signing_in { 24.0 } else { 0.0 };
+                + if app.signing_in() { 24.0 } else { 0.0 };
             ui.add_space(((w - galley_w) / 2.0).max(0.0));
-            if app.signing_in {
+            if app.signing_in() {
                 ui.add(egui::Spinner::new().size(16.0).color(t::BLUE));
             }
             widgets::text(ui, &app.status, 12.0, tone_color(app.tone));
@@ -398,6 +413,7 @@ fn settings_window(app: &mut App, ctx: &egui::Context) {
 }
 
 fn session_auth_window(app: &mut App, ctx: &egui::Context) {
+    let handler_ready = app.handler_ready;
     let Some(pending) = app.pending_auth.as_mut() else { return };
     let title = format!("Sign in to {}", pending.title);
     let mut submit = false;
@@ -405,23 +421,20 @@ fn session_auth_window(app: &mut App, ctx: &egui::Context) {
     let mut reopen = false;
     dialog(ctx, &title, 520.0, |ui| {
         ui.spacing_mut().item_spacing.y = 10.0;
-        widgets::text(
-            ui,
-            "FreeRDP needs a one-time Entra ID sign-in for this session. A browser window has opened. Sign in there, then copy the address of the page you land on and paste it below.",
-            13.0,
-            t::TEXT_SECONDARY,
-        );
-        widgets::text(
-            ui,
-            "The page will look blank or say the site cannot be reached; that is expected. Only the address matters.",
-            11.0,
-            t::TEXT_MUTED,
-        );
-        let edit = ui.add(
-            egui::TextEdit::singleline(&mut pending.paste)
-                .hint_text("https://login.microsoftonline.com/common/oauth2/nativeclient?code=...")
-                .desired_width(f32::INFINITY),
-        );
+        let (lead, hint) = if handler_ready {
+            (
+                "FreeRDP needs an Entra ID sign-in for this session. A browser window has opened; sign in there and, if the browser asks, let it open the link with R365. This dialog closes by itself.",
+                "If nothing happens, paste the address the browser ends on:",
+            )
+        } else {
+            (
+                "FreeRDP needs an Entra ID sign-in for this session. A browser window has opened. Sign in there, then copy the address of the page you land on and paste it below.",
+                "The page will look blank or say the site cannot be reached; that is expected. Only the address matters.",
+            )
+        };
+        ui.add(egui::Label::new(RichText::new(lead).size(13.0).color(t::TEXT_SECONDARY)).wrap());
+        widgets::text(ui, hint, 11.0, t::TEXT_MUTED);
+        let edit = ui.add(egui::TextEdit::singleline(&mut pending.paste).hint_text("...?code=...&state=...").desired_width(f32::INFINITY));
         if edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
             submit = true;
         }
@@ -445,7 +458,7 @@ fn session_auth_window(app: &mut App, ctx: &egui::Context) {
         app.reopen_auth_url();
     }
     if submit {
-        app.submit_redirect();
+        app.submit_pasted();
     } else if cancel {
         let key = app.pending_auth.as_ref().map(|p| p.key.clone()).unwrap_or_default();
         app.disconnect(&key);

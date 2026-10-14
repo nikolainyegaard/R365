@@ -11,6 +11,8 @@ repository.workspace = true
 serde = { workspace = true }
 serde_json = { workspace = true }
 roxmltree = "0.21"
+# SHA-256 for the PKCE code challenge.
+sha2 = { version = "0.10", default-features = false }
 
 [lints]
 workspace = true

@@ -27,6 +27,9 @@ pub struct LaunchOptions {
     pub auto_reconnect: bool,
     pub prevent_session_lock: bool,
     pub ignore_cert: bool,
+    /// Ask Entra to redirect session auth to the ms-appx-web broker scheme that R365 handles,
+    /// instead of the nativeclient page the user would have to copy from.
+    pub broker_redirect: bool,
     pub extra_args: Vec<String>,
 }
 
@@ -52,6 +55,12 @@ pub fn prepare_profile(contents: &str, opts: &LaunchOptions) -> String {
 /// Arguments after the FreeRDP binary. The .rdp file comes first, as FreeRDP requires.
 pub fn build_args(rdp_file: &str, username: &str, title: &str, opts: &LaunchOptions) -> crate::Result<Vec<String>> {
     let mut a: Vec<String> = vec![rdp_file.into(), "/gateway:type:arm".into(), "/sec:aad".into()];
+    if opts.broker_redirect {
+        // FreeRDP's CLI builds its authorize URL from this printf format (the default is the
+        // nativeclient page); a format without placeholders is valid C and ignores the arguments.
+        // A literal percent must be doubled, since the value is a printf format.
+        a.push(format!("/azure:avd-access:{}", crate::auth::percent_encode(crate::auth::REDIRECT_BROKER).replace('%', "%%")));
+    }
     if !username.trim().is_empty() {
         a.push(format!("/u:{username}"));
     }
@@ -244,6 +253,7 @@ mod tests {
             auto_reconnect: true,
             prevent_session_lock: true,
             ignore_cert: false,
+            broker_redirect: true,
             extra_args: vec![],
         }
     }
@@ -254,6 +264,7 @@ mod tests {
         assert_eq!(a[0], "/tmp/x.rdp");
         assert!(a.contains(&"/sec:aad".to_string()));
         assert!(a.contains(&"/u:me@corp.com".to_string()));
+        assert!(a.iter().any(|x| x.starts_with("/azure:avd-access:ms-appx-web%%3A%%2F%%2FMicrosoft.AAD.BrokerPlugin%%2Fa85cf173")));
         assert!(a.contains(&"/scale-desktop:125".to_string()));
         assert!(a.contains(&"+dynamic-resolution".to_string()));
         assert!(!a.contains(&"/f".to_string()));

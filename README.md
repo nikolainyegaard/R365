@@ -18,7 +18,7 @@ cargo run --release
 
 ## Status
 
-Early. Sign-in, the resource grid and session launch work. FreeRDP's per-session Entra ID prompt is answered by pasting the browser's final address into R365; a scheme handler that removes that step is planned (see docs/auth.md).
+Early. Sign-in happens in your browser; R365 registers itself as the handler for the `ms-appx-web` links Entra ID redirects to, so the browser hands the result back (it asks once). FreeRDP's per-session Entra ID prompt is completed the same way. If the handler cannot be registered, R365 asks you to paste the address the browser ends on. See docs/auth.md.
 
 ## Acknowledgements
 

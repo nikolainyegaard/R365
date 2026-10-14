@@ -1,22 +1,22 @@
-//! Token flows over plain HTTPS. No browser engine anywhere: the first sign-in is the device
-//! code grant in the user's own browser, everything after is the refresh token.
+//! Token flows over plain HTTPS. No browser engine anywhere: sign-in is the authorization code
+//! grant with PKCE in the user's own browser, everything after is the refresh token.
 
 use crate::http::Http;
-use r365_core::auth::{self, DeviceCode, Poll, TokenSet};
+use r365_core::auth::{self, Pkce, TokenSet};
 
-pub fn start_device_code(http: &Http) -> crate::Result<DeviceCode> {
-    let resp = http.post_form(&auth::device_code_url(), &auth::device_code_form())?;
-    if resp.status != 200 {
-        return Err(format!("Microsoft refused to start sign-in (HTTP {})", resp.status));
-    }
-    serde_json::from_slice(&resp.body).map_err(|e| format!("Device code response was not understood: {e}"))
+/// 48 bytes from the kernel for a new PKCE verifier and state.
+pub fn new_pkce() -> crate::Result<Pkce> {
+    let mut buf = [0u8; 48];
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| std::io::Read::read_exact(&mut f, &mut buf))
+        .map_err(|e| format!("Could not read randomness for sign-in: {e}"))?;
+    Pkce::new(&buf)
 }
 
-pub fn poll_device_code(http: &Http, code: &DeviceCode) -> Poll {
-    match http.post_form(&auth::token_url(), &auth::poll_form(&code.device_code)) {
-        Ok(resp) => auth::parse_poll(resp.status, &resp.text()),
-        Err(e) => Poll::Failed(e),
-    }
+pub fn exchange_code(http: &Http, code: &str, pkce: &Pkce, redirect_uri: &str) -> crate::Result<TokenSet> {
+    let resp = http.post_form(&auth::token_url(), &auth::code_form(code, &pkce.verifier, redirect_uri))?;
+    let tokens = auth::parse_token_response(resp.status, &resp.text())?;
+    TokenSet::from_response(tokens, None, crate::now_unix())
 }
 
 pub fn refresh(http: &Http, previous: &TokenSet) -> crate::Result<TokenSet> {

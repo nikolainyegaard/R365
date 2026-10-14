@@ -5,10 +5,10 @@ All notable changes to this project are documented here. The format follows Keep
 ## [Unreleased]
 
 ### Added
-- Device code sign-in to Entra ID in the system browser, refresh token kept in the user keyring
+- Entra ID sign-in in the system browser (authorization code with PKCE, handed back through the ms-appx-web scheme handler R365 registers), refresh token kept in the user keyring
 - Workspace feed discovery and resource grid grouped by tenant, with search and a cached last feed
 - FreeRDP 3 launch for Cloud PCs and RemoteApps with session status on each card, display mode choices in the context menu, and session logs
-- Session auth dialog for FreeRDP's Entra ID prompt
+- Session auth for FreeRDP's Entra ID prompt, completed automatically through the scheme handler, with a paste fallback
 - Settings for display, devices, connection and the FreeRDP binary
 
 [Unreleased]: https://github.com/nikolainyegaard/R365/commits/main

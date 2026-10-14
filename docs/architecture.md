@@ -16,12 +16,14 @@ Layering: `core` depends on nothing in the workspace. `native` uses `core`. `ui`
 ## Files
 
 ```
-crates/core/src/auth.rs      client ID, scopes, device code and refresh forms, token response parsing, id_token claims, TokenSet
+crates/core/src/auth.rs      client ID, scopes, redirect URIs, PKCE, authorize URL, code and refresh forms, redirect and token parsing, id_token claims, TokenSet
 crates/core/src/feed.rs      feed discovery and workspace XML parsing, Microsoft host allowlist
 crates/core/src/rdp.rs       launch options, .rdp rewriting, FreeRDP argv, stdout markers, log redaction, SessionStatus
 crates/core/src/config.rs    ClientConfig with defaults, DisplayMode to LaunchOptions
 crates/native/src/http.rs    one blocking client; manual redirects that never carry the bearer token across origins
-crates/native/src/auth.rs    device code start and poll, refresh, ensure_fresh
+crates/native/src/auth.rs    PKCE randomness, code exchange, refresh, ensure_fresh
+crates/native/src/handler.rs r365.desktop and the ms-appx-web scheme registration
+crates/native/src/ipc.rs     single instance over a Unix socket; a second process forwards its URL argument
 crates/native/src/secret.rs  refresh token in the keyring via secret-tool, file fallback
 crates/native/src/feed.rs    discovery, per-tenant fetch, .rdp download, on-disk cache
 crates/native/src/freerdp.rs locate a client, spawn it under `script`, parse its output into SessionEvents
@@ -45,6 +47,7 @@ The UI thread never blocks. Every network call and process spawn runs on a `std:
 | egui, eframe (glow) | the UI; glow over wgpu for a smaller binary and lower idle memory |
 | ureq (rustls, platform-verifier) | blocking HTTPS with the OS trust store, no bundled root list |
 | roxmltree | read-only XML tree for the RADC feed; namespace-agnostic lookups are a few lines on top |
+| sha2 | SHA-256 for the PKCE code challenge |
 | serde, serde_json | settings file, token storage, feed cache, Entra ID JSON |
 
 Everything else is the standard library: `secret-tool`, `xdg-open`, `script` and `flatpak` are run as child processes rather than linked.
@@ -57,4 +60,6 @@ Everything else is the standard library: `secret-tool`, `xdg-open`, `script` and
 ~/.local/share/r365/feed/           downloaded .rdp profiles and their .active.rdp rewrites
 ~/.local/share/r365/logs/           session logs, newest ten kept, tokens redacted
 ~/.local/share/r365/tokens.json     only when the keyring is unavailable
+~/.local/share/applications/r365.desktop   the scheme handler entry, rewritten when the binary moves
+$XDG_RUNTIME_DIR/r365.sock          the single-instance socket
 ```

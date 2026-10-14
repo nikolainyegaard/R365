@@ -1,23 +1,21 @@
 //! Application state and the background work it starts. All I/O runs on plain threads and
 //! reports back through channels; `update` drains them once per frame.
 
-use r365_core::auth::{DeviceCode, Poll, TokenSet};
+use r365_core::auth::{self as core_auth, Pkce, TokenSet};
 use r365_core::config::ClientConfig;
 use r365_core::feed::{Resource, Workspace};
 use r365_core::rdp::{DisplayMode, SessionStatus, prepare_profile};
 use r365_native::freerdp::{FreeRdp, Session, SessionEvent};
 use r365_native::http::Http;
-use r365_native::{auth, browser, feed, freerdp, paths, secret};
+use r365_native::{auth, browser, feed, freerdp, handler, ipc, paths, secret};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub enum Msg {
-    DeviceCode(DeviceCode),
     SignedIn(r365_core::Result<TokenSet>),
     Tokens(TokenSet),
     Workspaces(r365_core::Result<Vec<Workspace>>),
@@ -30,6 +28,14 @@ pub enum Tone {
     Neutral,
     Active,
     Error,
+}
+
+/// A sign-in started in the browser and not yet handed back.
+pub struct SignIn {
+    pub pkce: Pkce,
+    pub url: String,
+    pub paste: String,
+    pub exchanging: bool,
 }
 
 pub struct PendingAuth {
@@ -45,7 +51,11 @@ pub struct App {
     rx: Receiver<Msg>,
     session_tx: Sender<(String, SessionEvent)>,
     session_rx: Receiver<(String, SessionEvent)>,
+    ipc_rx: Receiver<String>,
     http: Arc<Http>,
+    /// R365 owns the ms-appx-web scheme, so redirects arrive on the socket instead of by paste.
+    pub handler_ready: bool,
+    pub redirect_uri: &'static str,
     pub config: ClientConfig,
     pub freerdp: Option<FreeRdp>,
     pub tokens: Option<TokenSet>,
@@ -53,9 +63,7 @@ pub struct App {
     pub statuses: HashMap<String, SessionStatus>,
     sessions: HashMap<String, Session>,
     pub pending_auth: Option<PendingAuth>,
-    pub device_code: Option<DeviceCode>,
-    sign_in_cancel: Arc<AtomicBool>,
-    pub signing_in: bool,
+    pub sign_in: Option<SignIn>,
     pub loading: bool,
     pub status: String,
     pub tone: Tone,
@@ -67,9 +75,12 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(ctx: egui::Context) -> Self {
+    pub fn new(ctx: egui::Context, initial_url: Option<String>) -> Self {
         let (tx, rx) = channel();
         let (session_tx, session_rx) = channel();
+        let (ipc_tx, ipc_rx) = channel();
+        let listening = ipc::listen(ipc_tx);
+        let handler_ready = listening && handler::register().is_ok();
         let config = std::fs::read_to_string(paths::config_file()).ok().and_then(|s| ClientConfig::parse(&s).ok()).unwrap_or_default();
         let freerdp = freerdp::locate(&config.freerdp_path);
         let tokens = secret::load();
@@ -80,7 +91,10 @@ impl App {
             rx,
             session_tx,
             session_rx,
+            ipc_rx,
             http: Arc::new(Http::new()),
+            handler_ready,
+            redirect_uri: if handler_ready { core_auth::REDIRECT_BROKER } else { core_auth::REDIRECT_NATIVE },
             config,
             freerdp,
             tokens,
@@ -88,9 +102,7 @@ impl App {
             statuses: HashMap::new(),
             sessions: HashMap::new(),
             pending_auth: None,
-            device_code: None,
-            sign_in_cancel: Arc::new(AtomicBool::new(false)),
-            signing_in: false,
+            sign_in: None,
             loading: false,
             status: String::new(),
             tone: Tone::Neutral,
@@ -105,7 +117,14 @@ impl App {
         } else {
             app.set_status("Sign in to see your Cloud PCs", Tone::Neutral);
         }
+        if let Some(url) = initial_url {
+            app.deliver_redirect(&url);
+        }
         app
+    }
+
+    pub fn signing_in(&self) -> bool {
+        self.sign_in.is_some()
     }
 
     pub fn set_status(&mut self, s: impl Into<String>, tone: Tone) {
@@ -137,6 +156,9 @@ impl App {
         while let Ok((key, event)) = self.session_rx.try_recv() {
             self.handle_session(key, event);
         }
+        while let Ok(url) = self.ipc_rx.try_recv() {
+            self.deliver_redirect(&url);
+        }
         let due = self.last_sync.is_some_and(|t| t.elapsed() > Duration::from_secs(u64::from(self.config.auto_refresh_minutes.max(1)) * 60));
         if due && !self.loading && self.signed_in() {
             self.refresh_workspaces();
@@ -145,20 +167,14 @@ impl App {
 
     fn handle(&mut self, msg: Msg) {
         match msg {
-            Msg::DeviceCode(code) => {
-                self.device_code = Some(code);
-                self.set_status("Enter the code in your browser to finish signing in", Tone::Active);
-            }
             Msg::SignedIn(Ok(tokens)) => {
-                self.signing_in = false;
-                self.device_code = None;
+                self.sign_in = None;
                 self.tokens = Some(tokens);
                 self.set_status("Signed in", Tone::Neutral);
                 self.refresh_workspaces();
             }
             Msg::SignedIn(Err(e)) => {
-                self.signing_in = false;
-                self.device_code = None;
+                self.sign_in = None;
                 self.set_status(e, Tone::Error);
             }
             Msg::Tokens(t) => self.tokens = Some(t),
@@ -231,54 +247,71 @@ impl App {
     }
 
     pub fn start_sign_in(&mut self) {
-        if self.signing_in {
+        if self.sign_in.as_ref().is_some_and(|s| s.exchanging) {
             return;
         }
-        self.signing_in = true;
-        self.sign_in_cancel = Arc::new(AtomicBool::new(false));
-        self.set_status("Contacting Microsoft", Tone::Active);
-        let (http, tx, ctx, cancel) = (self.http.clone(), self.tx.clone(), self.ctx.clone(), self.sign_in_cancel.clone());
-        self.spawn(move || {
-            let code = match auth::start_device_code(&http) {
-                Ok(c) => c,
-                Err(e) => {
-                    let _ = tx.send(Msg::SignedIn(Err(e)));
-                    return;
-                }
-            };
-            let _ = tx.send(Msg::DeviceCode(code.clone()));
-            ctx.request_repaint();
-            let _ = browser::open(&code.verification_uri);
-            let deadline = Instant::now() + Duration::from_secs(code.expires_in);
-            let mut interval = code.interval.max(1);
-            while Instant::now() < deadline {
-                std::thread::sleep(Duration::from_secs(interval));
-                if cancel.load(Ordering::SeqCst) {
-                    return;
-                }
-                match auth::poll_device_code(&http, &code) {
-                    Poll::Pending => {}
-                    Poll::SlowDown => interval += 5,
-                    Poll::Done(resp) => {
-                        let result = TokenSet::from_response(resp, None, r365_native::now_unix()).and_then(|t| secret::store(&t).map(|()| t));
-                        let _ = tx.send(Msg::SignedIn(result));
-                        return;
-                    }
-                    Poll::Failed(e) => {
-                        let _ = tx.send(Msg::SignedIn(Err(e)));
-                        return;
-                    }
-                }
+        let pkce = match auth::new_pkce() {
+            Ok(p) => p,
+            Err(e) => {
+                self.set_status(e, Tone::Error);
+                return;
             }
-            let _ = tx.send(Msg::SignedIn(Err("The sign-in code expired. Start again.".into())));
-        });
+        };
+        let url = core_auth::authorize_url(&pkce, self.redirect_uri);
+        if let Err(e) = browser::open(&url) {
+            self.set_status(e, Tone::Error);
+            return;
+        }
+        self.sign_in = Some(SignIn { pkce, url, paste: String::new(), exchanging: false });
+        self.set_status("Finish signing in in your browser", Tone::Active);
+    }
+
+    pub fn reopen_sign_in(&self) {
+        if let Some(s) = &self.sign_in {
+            let _ = browser::open(&s.url);
+        }
     }
 
     pub fn cancel_sign_in(&mut self) {
-        self.sign_in_cancel.store(true, Ordering::SeqCst);
-        self.signing_in = false;
-        self.device_code = None;
+        self.sign_in = None;
         self.set_status("Sign-in cancelled", Tone::Neutral);
+    }
+
+    /// A redirect URL from the browser, the socket, or the paste box. Whichever flow is waiting
+    /// gets it: the app's own sign-in, or a FreeRDP session prompt.
+    pub fn deliver_redirect(&mut self, url: &str) {
+        let url = url.trim();
+        if let Some(sign_in) = self.sign_in.as_mut().filter(|s| !s.exchanging) {
+            match core_auth::parse_redirect(url) {
+                Ok((code, state)) if state == sign_in.pkce.state => {
+                    sign_in.exchanging = true;
+                    let (http, tx, pkce, redirect) = (self.http.clone(), self.tx.clone(), sign_in.pkce.clone(), self.redirect_uri);
+                    self.set_status("Completing sign-in", Tone::Active);
+                    self.spawn(move || {
+                        let result = auth::exchange_code(&http, &code, &pkce, redirect).and_then(|t| secret::store(&t).map(|()| t));
+                        let _ = tx.send(Msg::SignedIn(result));
+                    });
+                }
+                Ok(_) => self.set_status("That sign-in link belongs to an older attempt. Start the sign-in again.", Tone::Error),
+                Err(e) => self.set_status(e, Tone::Error),
+            }
+            return;
+        }
+        if let Some(pending) = self.pending_auth.take() {
+            match self.sessions.get(&pending.key) {
+                Some(session) if url.contains("code=") => match session.submit_redirect(url) {
+                    Ok(()) => self.set_status(format!("Completing sign-in for {}", pending.title), Tone::Active),
+                    Err(e) => self.error_dialog = Some(e),
+                },
+                Some(_) => {
+                    self.set_status("That address has no sign-in code in it", Tone::Error);
+                    self.pending_auth = Some(pending);
+                }
+                None => self.set_status("The session ended before sign-in finished", Tone::Neutral),
+            }
+            return;
+        }
+        self.set_status("Received a sign-in link, but nothing was waiting for it", Tone::Neutral);
     }
 
     pub fn refresh_workspaces(&mut self) {
@@ -317,7 +350,7 @@ impl App {
         }
         self.statuses.insert(key.clone(), SessionStatus::Starting);
         self.set_status(format!("Starting {}", resource.title), Tone::Active);
-        let opts = self.config.launch_options(mode);
+        let opts = self.config.launch_options(mode, self.handler_ready);
         let username = tokens.claims.rdp_username();
         let (http, tx, stx, resource) = (self.http.clone(), self.tx.clone(), self.session_tx.clone(), resource.clone());
         self.spawn(move || {
@@ -354,13 +387,11 @@ impl App {
         self.connect(resource, DisplayMode::Default);
     }
 
-    pub fn submit_redirect(&mut self) {
-        let Some(pending) = self.pending_auth.take() else { return };
-        let Some(session) = self.sessions.get(&pending.key) else { return };
-        if let Err(e) = session.submit_redirect(&pending.paste) {
-            self.error_dialog = Some(e);
-        } else {
-            self.set_status(format!("Completing sign-in for {}", pending.title), Tone::Active);
+    pub fn submit_pasted(&mut self) {
+        let pasted =
+            self.sign_in.as_ref().map(|s| s.paste.clone()).or_else(|| self.pending_auth.as_ref().map(|p| p.paste.clone())).unwrap_or_default();
+        if !pasted.trim().is_empty() {
+            self.deliver_redirect(&pasted);
         }
     }
 

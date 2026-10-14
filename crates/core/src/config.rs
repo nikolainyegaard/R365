@@ -59,7 +59,7 @@ impl ClientConfig {
         serde_json::to_string_pretty(self).unwrap_or_else(|_| "{}".into())
     }
 
-    pub fn launch_options(&self, mode: DisplayMode) -> LaunchOptions {
+    pub fn launch_options(&self, mode: DisplayMode, broker_redirect: bool) -> LaunchOptions {
         let multi_monitor = mode == DisplayMode::MultiMonitor || (mode == DisplayMode::Default && self.multi_monitor);
         let fullscreen = multi_monitor || mode == DisplayMode::Fullscreen || (mode == DisplayMode::Default && self.fullscreen);
         LaunchOptions {
@@ -77,6 +77,7 @@ impl ClientConfig {
             auto_reconnect: self.auto_reconnect,
             prevent_session_lock: self.prevent_session_lock,
             ignore_cert: self.ignore_cert,
+            broker_redirect,
             extra_args: self.extra_args.clone(),
         }
     }
@@ -98,10 +99,10 @@ mod tests {
     #[test]
     fn display_mode_overrides() {
         let c = ClientConfig::default();
-        assert!(c.launch_options(DisplayMode::MultiMonitor).fullscreen);
-        assert!(!c.launch_options(DisplayMode::Windowed).fullscreen);
+        assert!(c.launch_options(DisplayMode::MultiMonitor, true).fullscreen);
+        assert!(!c.launch_options(DisplayMode::Windowed, true).fullscreen);
         let f = ClientConfig { fullscreen: true, ..Default::default() };
-        assert!(f.launch_options(DisplayMode::Default).fullscreen);
-        assert!(!f.launch_options(DisplayMode::Windowed).fullscreen);
+        assert!(f.launch_options(DisplayMode::Default, true).fullscreen);
+        assert!(!f.launch_options(DisplayMode::Windowed, true).fullscreen);
     }
 }

@@ -7,3 +7,6 @@
 - **`secret-tool lookup` returns the secret without a trailing newline;** `store` reads the secret from stdin until EOF. Both are relied on in `native::secret`.
 - **`script` merges stderr into stdout.** The direct-spawn fallback pipes stderr separately and drains it so FreeRDP never blocks on a full pipe.
 - **Never-crash lints are workspace-wide** (`[workspace.lints.clippy]` in the root Cargo.toml), with unwrap, expect, panic and indexing allowed in tests through `clippy.toml`. A new crate gets them by adding `[lints] workspace = true`.
+- **The device code grant dies at the finish line for this client ID.** Start and polling look fine; completion returns AADSTS7000218. Do not try it again; see docs/auth.md.
+- **FreeRDP's `/azure:avd-access` value is a printf format.** `%2F` would be parsed as a conversion. Double every percent sign.
+- **The desktop file points at the running binary's path.** A `cargo run` build registers `target/debug/r365`, a release build `target/release/r365`; whichever ran last owns the scheme. Harmless in development, and packaging will install a fixed path.

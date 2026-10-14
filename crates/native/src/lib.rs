@@ -4,7 +4,9 @@ pub mod auth;
 pub mod browser;
 pub mod feed;
 pub mod freerdp;
+pub mod handler;
 pub mod http;
+pub mod ipc;
 pub mod paths;
 pub mod secret;
 
