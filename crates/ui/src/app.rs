@@ -36,6 +36,7 @@ pub struct SignIn {
     pub url: String,
     pub paste: String,
     pub exchanging: bool,
+    pub started: Instant,
 }
 
 pub struct PendingAuth {
@@ -43,7 +44,12 @@ pub struct PendingAuth {
     pub title: String,
     pub url: String,
     pub paste: String,
+    pub started: Instant,
 }
+
+/// How long the browser gets before the paste fallback is offered. A warm browser session
+/// hands the link back in under three seconds.
+pub const FALLBACK_AFTER: Duration = Duration::from_secs(3);
 
 pub struct App {
     ctx: egui::Context,
@@ -223,7 +229,7 @@ impl App {
             SessionEvent::AuthRequired(url) => {
                 let title = self.title_of(&key);
                 let _ = browser::open(&url);
-                self.pending_auth = Some(PendingAuth { key, title, url, paste: String::new() });
+                self.pending_auth = Some(PendingAuth { key, title, url, paste: String::new(), started: Instant::now() });
             }
             SessionEvent::Exited(_) => {
                 self.sessions.remove(&key);
@@ -262,7 +268,7 @@ impl App {
             self.set_status(e, Tone::Error);
             return;
         }
-        self.sign_in = Some(SignIn { pkce, url, paste: String::new(), exchanging: false });
+        self.sign_in = Some(SignIn { pkce, url, paste: String::new(), exchanging: false, started: Instant::now() });
         self.set_status("Finish signing in in your browser", Tone::Active);
     }
 

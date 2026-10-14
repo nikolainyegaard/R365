@@ -1,6 +1,6 @@
 //! Screens and dialogs. Layout and copy follow JW365's main window.
 
-use crate::app::{App, Tone, VERSION};
+use crate::app::{App, FALLBACK_AFTER, Tone, VERSION};
 use crate::theme::{self as t};
 use crate::widgets::{self, Kind};
 use egui::{Align, Align2, CornerRadius, Frame, Layout, Margin, RichText, Sense, Stroke, StrokeKind, Ui, UiBuilder, vec2};
@@ -32,7 +32,7 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
     session_auth_window(app, ctx);
     sign_out_dialog(app, ctx);
     error_dialog(app, ctx);
-    if app.loading || app.signing_in() || app.any_session_busy() {
+    if app.loading || app.signing_in() || app.pending_auth.is_some() || app.any_session_busy() {
         ctx.request_repaint_after(std::time::Duration::from_millis(250));
     }
 }
@@ -40,7 +40,11 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
 fn sign_in(app: &mut App, root: &mut Ui) {
     egui::CentralPanel::default().frame(Frame::new().fill(t::CANVAS)).show(root, |ui| {
         let card_w = 440.0_f32.min(ui.available_width() - 40.0);
-        let card_h = if app.sign_in.is_some() { 400.0 } else { 330.0 };
+        let card_h = match &app.sign_in {
+            Some(s) if s.started.elapsed() >= FALLBACK_AFTER => 400.0,
+            Some(_) => 350.0,
+            None => 330.0,
+        };
         let rect = egui::Rect::from_center_size(ui.max_rect().center(), vec2(card_w, card_h));
         ui.painter().rect(rect, CornerRadius::same(16), t::CARD, t::hairline(), StrokeKind::Inside);
         let mut card = ui.new_child(UiBuilder::new().max_rect(rect.shrink(36.0)).layout(Layout::top_down(Align::Center)));
@@ -50,23 +54,28 @@ fn sign_in(app: &mut App, root: &mut Ui) {
         widgets::text(&mut card, "Connect to your Cloud PCs and virtual desktops from Linux", 13.0, t::TEXT_SECONDARY);
         card.add_space(10.0);
         if let Some(sign_in) = app.sign_in.as_mut() {
-            let (lead, hint) = if app.handler_ready {
-                (
-                    "Finish signing in in the browser window that opened. If the browser asks, let it open the link with R365.",
-                    "If nothing happens after sign-in, paste the address the browser ends on:",
-                )
+            let show_fallback = !sign_in.exchanging && sign_in.started.elapsed() >= FALLBACK_AFTER;
+            let lead = if app.handler_ready {
+                "Finish signing in in the browser window that opened. If the browser asks, let it open the link with R365."
             } else {
-                ("Finish signing in in the browser window that opened.", "Then copy the address of the page you land on and paste it here:")
+                "Finish signing in in the browser window that opened, then copy the address of the page you land on and paste it here."
             };
             card.add(egui::Label::new(RichText::new(lead).size(12.0).color(t::TEXT_SECONDARY)).wrap());
-            widgets::text(&mut card, hint, 11.0, t::TEXT_MUTED);
-            let edit = card.add(egui::TextEdit::singleline(&mut sign_in.paste).hint_text("...?code=...&state=...").desired_width(f32::INFINITY));
-            let submit_key = edit.lost_focus() && card.input(|i| i.key_pressed(egui::Key::Enter));
+            let mut action: Option<u8> = None;
+            if show_fallback {
+                if app.handler_ready {
+                    widgets::text(&mut card, "Browser did not hand the sign-in back? Paste the address it ended on:", 11.0, t::TEXT_MUTED);
+                }
+                let edit = card.add(egui::TextEdit::singleline(&mut sign_in.paste).hint_text("...?code=...&state=...").desired_width(f32::INFINITY));
+                if edit.lost_focus() && card.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    action = Some(0);
+                }
+            }
             card.add_space(6.0);
-            let mut action: Option<u8> = if submit_key { Some(0) } else { None };
+            let buttons = if show_fallback { 3.0 } else { 2.0 };
             card.horizontal(|ui| {
-                ui.add_space((ui.available_width() - 3.0 * 118.0 - 16.0).max(0.0) / 2.0);
-                if widgets::button(ui, "Continue", Kind::Primary, 118.0).clicked() {
+                ui.add_space((ui.available_width() - buttons * 118.0 - (buttons - 1.0) * 8.0).max(0.0) / 2.0);
+                if show_fallback && widgets::button(ui, "Continue", Kind::Primary, 118.0).clicked() {
                     action = Some(0);
                 }
                 if widgets::button(ui, "Open browser", Kind::Secondary, 118.0).clicked() {
@@ -419,31 +428,31 @@ fn session_auth_window(app: &mut App, ctx: &egui::Context) {
     let mut submit = false;
     let mut cancel = false;
     let mut reopen = false;
+    let show_fallback = pending.started.elapsed() >= FALLBACK_AFTER;
     dialog(ctx, &title, 520.0, |ui| {
         ui.spacing_mut().item_spacing.y = 10.0;
-        let (lead, hint) = if handler_ready {
-            (
-                "FreeRDP needs an Entra ID sign-in for this session. A browser window has opened; sign in there and, if the browser asks, let it open the link with R365. This dialog closes by itself.",
-                "If nothing happens, paste the address the browser ends on:",
-            )
+        let lead = if handler_ready {
+            "FreeRDP needs an Entra ID sign-in for this session. A browser window has opened; sign in there and, if the browser asks, let it open the link with R365. This dialog closes by itself."
         } else {
-            (
-                "FreeRDP needs an Entra ID sign-in for this session. A browser window has opened. Sign in there, then copy the address of the page you land on and paste it below.",
-                "The page will look blank or say the site cannot be reached; that is expected. Only the address matters.",
-            )
+            "FreeRDP needs an Entra ID sign-in for this session. A browser window has opened. Sign in there, then copy the address of the page you land on and paste it below. The page will look blank or say the site cannot be reached; only the address matters."
         };
         ui.add(egui::Label::new(RichText::new(lead).size(13.0).color(t::TEXT_SECONDARY)).wrap());
-        widgets::text(ui, hint, 11.0, t::TEXT_MUTED);
-        let edit = ui.add(egui::TextEdit::singleline(&mut pending.paste).hint_text("...?code=...&state=...").desired_width(f32::INFINITY));
-        if edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-            submit = true;
-        }
-        let looks_right = pending.paste.contains("code=");
-        if !pending.paste.trim().is_empty() && !looks_right {
-            widgets::text(ui, "That address has no code in it. Paste the address of the page shown after sign-in.", 11.0, t::ERROR_TEXT);
+        let mut looks_right = false;
+        if show_fallback {
+            if handler_ready {
+                widgets::text(ui, "Browser did not hand the sign-in back? Paste the address it ended on:", 11.0, t::TEXT_MUTED);
+            }
+            let edit = ui.add(egui::TextEdit::singleline(&mut pending.paste).hint_text("...?code=...&state=...").desired_width(f32::INFINITY));
+            if edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                submit = true;
+            }
+            looks_right = pending.paste.contains("code=");
+            if !pending.paste.trim().is_empty() && !looks_right {
+                widgets::text(ui, "That address has no code in it. Paste the address of the page shown after sign-in.", 11.0, t::ERROR_TEXT);
+            }
         }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if ui.add_enabled_ui(looks_right, |ui| widgets::button(ui, "Continue", Kind::Primary, 100.0)).inner.clicked() {
+            if show_fallback && ui.add_enabled_ui(looks_right, |ui| widgets::button(ui, "Continue", Kind::Primary, 100.0)).inner.clicked() {
                 submit = true;
             }
             if widgets::button(ui, "Open browser again", Kind::Secondary, 0.0).clicked() {
