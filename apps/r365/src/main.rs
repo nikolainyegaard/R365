@@ -26,8 +26,14 @@ struct Shell {
 }
 
 impl eframe::App for Shell {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        if let Some(token) = frame.take_activation_token() {
+            self.app.deliver_activation_token(token);
+        }
         r365_ui::views::draw(&mut self.app, ui);
+        if self.app.take_token_request() {
+            frame.request_activation_token();
+        }
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {

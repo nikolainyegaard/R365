@@ -25,8 +25,11 @@ indexing_slicing = "deny"
 r365-core = { path = "crates/core" }
 r365-native = { path = "crates/native" }
 r365-ui = { path = "crates/ui" }
-egui = "0.36"
-eframe = { version = "0.36", default-features = false }
+# Pinned to upstream main until the release after 0.36.2: eframe gained
+# Frame::request_activation_token there (emilk/egui#8282), which lets the browser take focus on
+# Wayland. Drop the git pins when a crates.io release contains it.
+egui = { git = "https://github.com/emilk/egui", rev = "db63b6d1765552b345491ae4ee5894de8440cd44" }
+eframe = { git = "https://github.com/emilk/egui", rev = "db63b6d1765552b345491ae4ee5894de8440cd44", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

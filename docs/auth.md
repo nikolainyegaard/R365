@@ -40,8 +40,19 @@ It was the first choice: no redirect URI at all. Starting it works and polling r
 
 ## Session auth for FreeRDP
 
+FreeRDP needs two tokens per connection: the AVD gateway token (same scope as R365's own access token, so R365 passes it in as `/gateway:bearer`, no prompt) and the RDS session token (proof of possession, bound to FreeRDP's key pair and the Cloud PC's nonce, so FreeRDP must fetch it itself, one prompt).
+
+
 With `/sec:aad` FreeRDP prints `Browse to: <authorize URL>` and waits on its terminal for the URL the browser lands on. `native::freerdp::watch` turns that line into `SessionEvent::AuthRequired`, the app opens the URL in the browser and shows a dialog. With the scheme handler active, `core::rdp::build_args` also passes `/azure:avd-access:<broker redirect>` so FreeRDP's authorize URL redirects to `ms-appx-web://...`, the browser hands it to R365, and `App::deliver_redirect` writes it to FreeRDP's stdin through `Session::submit_redirect`; the dialog closes by itself. Without the handler the user pastes the nativeclient address. FreeRDP only looks for `code=` and the mirrored `state=` in what it is given, so the redirect's scheme does not matter to it.
 
 The `/azure:avd-access` value is used by FreeRDP as a printf format, so every `%` in it is doubled.
 
 Further out: a token request in FreeRDP's auth helper protocol (`client/common/aad-helper-protocol.md`) answered from the refresh token, so no browser tab opens per session at all.
+
+## Browser focus
+
+Wayland compositors refuse to raise a window the user did not ask for, and a new tab in a background browser is exactly that. The way through is an activation token: the focused window asks the compositor for one, tied to the click, and the launched process presents it. eframe exposes this since emilk/egui#8282 (unreleased as of 2026-10-20, hence the git pin in the root Cargo.toml) as `Frame::request_activation_token` and `Frame::take_activation_token`.
+
+Flow: `App::open_browser` records the URL and sets a flag; the shell in apps/r365 sees the flag after drawing and calls `request_activation_token`; the token arrives a frame or two later and the shell passes it to `App::deliver_activation_token`, which launches the browser with `XDG_ACTIVATION_TOKEN` (or `DESKTOP_STARTUP_ID` on X11) in its environment. If no token arrives within 400 ms (`TOKEN_WAIT`), the launch goes ahead without one and `native::browser::open` falls back to the browser's "new-window" desktop action, which the compositor also allows to take focus.
+
+The reverse direction stays a task bar highlight: the token Firefox gives the second r365 process is not usable by the already running window.

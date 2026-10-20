@@ -44,7 +44,7 @@ The UI thread never blocks. Every network call and process spawn runs on a `std:
 
 | Crate | Why |
 |-------|-----|
-| egui, eframe (glow) | the UI; glow over wgpu for a smaller binary and lower idle memory |
+| egui, eframe (glow) | the UI; glow over wgpu for a smaller binary and lower idle memory; pinned to a git rev until the release after 0.36.2 |
 | ureq (rustls, platform-verifier) | blocking HTTPS with the OS trust store, no bundled root list |
 | roxmltree | read-only XML tree for the RADC feed; namespace-agnostic lookups are a few lines on top |
 | sha2 | SHA-256 for the PKCE code challenge |

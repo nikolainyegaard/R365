@@ -150,19 +150,23 @@ impl Session {
     }
 }
 
-/// Starts FreeRDP for one resource. Events arrive on `tx` tagged with `key` from a reader
-/// thread until the process exits.
-pub fn launch(
-    freerdp: &FreeRdp,
-    rdp_file: &Path,
-    username: &str,
-    title: &str,
-    opts: &LaunchOptions,
-    key: String,
-    tx: Sender<(String, SessionEvent)>,
-) -> crate::Result<Session> {
+/// What one session launch needs besides the options.
+pub struct LaunchRequest<'a> {
+    pub rdp_file: &'a Path,
+    pub username: &'a str,
+    pub title: &'a str,
+    /// Access token for the AVD gateway scope; see `core::rdp::build_args`.
+    pub gateway_token: Option<&'a str>,
+    /// The resource key every event is tagged with.
+    pub key: String,
+}
+
+/// Starts FreeRDP for one resource. Events arrive on `tx` tagged with the request's key from a
+/// reader thread until the process exits.
+pub fn launch(freerdp: &FreeRdp, req: LaunchRequest<'_>, opts: &LaunchOptions, tx: Sender<(String, SessionEvent)>) -> crate::Result<Session> {
+    let LaunchRequest { rdp_file, username, title, gateway_token, key } = req;
     ensure_sdl_config();
-    let args = rdp::build_args(&rdp_file.to_string_lossy(), username, title, opts)?;
+    let args = rdp::build_args(&rdp_file.to_string_lossy(), username, title, opts, gateway_token)?;
     let argv = freerdp.argv(args);
     let mut cmd = if is_executable(Path::new("/usr/bin/script")) {
         let joined = argv.iter().map(|a| format!("'{}'", a.replace('\'', "'\\''"))).collect::<Vec<_>>().join(" ");

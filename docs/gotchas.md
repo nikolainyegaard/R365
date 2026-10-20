@@ -10,3 +10,5 @@
 - **The device code grant dies at the finish line for this client ID.** Start and polling look fine; completion returns AADSTS7000218. Do not try it again; see docs/auth.md.
 - **FreeRDP's `/azure:avd-access` value is a printf format.** `%2F` would be parsed as a conversion. Double every percent sign.
 - **The desktop file points at the running binary's path.** A `cargo run` build registers `target/debug/r365`, a release build `target/release/r365`; whichever ran last owns the scheme. Harmless in development, and packaging will install a fixed path.
+- **egui and eframe come from a git pin, not crates.io,** for `Frame::request_activation_token`. Both must point at the same rev. Drop the pin when the next release ships it.
+- **`git branch -f x upstream/main` makes `x` track upstream.** Follow it with `git branch --unset-upstream x` in the egui fork.

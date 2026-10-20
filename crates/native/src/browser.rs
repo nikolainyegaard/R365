@@ -1,39 +1,47 @@
 //! Opening https links in the user's browser.
 //!
 //! On Wayland a process without an activation token cannot raise an existing window, so a new
-//! tab in a background browser stays hidden (KWin's focus stealing prevention). A brand new
-//! window is allowed to take focus, so the default browser's own "new-window" desktop action is
-//! used when it has one; xdg-open is the fallback.
+//! tab in a background browser stays hidden (KWin's focus stealing prevention). With a token
+//! from our own window (`XDG_ACTIVATION_TOKEN`, or `DESKTOP_STARTUP_ID` on X11) the browser is
+//! allowed to come forward. Without one, a brand new window is the next best thing, since the
+//! compositor lets new windows take focus; the default browser's own "new-window" desktop action
+//! provides that. xdg-open is the last resort.
 
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-pub fn open(url: &str) -> crate::Result<()> {
+pub fn open(url: &str, activation_token: Option<&str>) -> crate::Result<()> {
     if !url.starts_with("https://") {
         return Err("Only https links are opened".into());
     }
-    let mut cmd = new_window_command(url).unwrap_or_else(|| {
+    let mut cmd = match activation_token {
+        Some(_) => desktop_command(url, None),
+        None => desktop_command(url, Some("new-window")),
+    }
+    .unwrap_or_else(|| {
         let mut c = Command::new("xdg-open");
         c.arg(url);
         c
     });
+    if let Some(token) = activation_token {
+        let var = if std::env::var_os("WAYLAND_DISPLAY").is_some() { "XDG_ACTIVATION_TOKEN" } else { "DESKTOP_STARTUP_ID" };
+        cmd.env(var, token);
+    }
     cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map(|_| ()).map_err(|e| format!("Could not open the browser: {e}"))
 }
 
-/// The default browser's `[Desktop Action new-window]` Exec line, with the URL substituted.
-fn new_window_command(url: &str) -> Option<Command> {
+/// The default browser's Exec line, from `[Desktop Entry]` or from `[Desktop Action <name>]`,
+/// with the URL substituted.
+fn desktop_command(url: &str, action: Option<&str>) -> Option<Command> {
     let out = Command::new("xdg-settings").args(["get", "default-web-browser"]).stderr(Stdio::null()).output().ok()?;
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
     if id.is_empty() || id.contains('/') {
         return None;
     }
     let contents = application_dirs().into_iter().find_map(|d| std::fs::read_to_string(d.join(&id)).ok())?;
-    let exec = contents
-        .lines()
-        .skip_while(|l| l.trim() != "[Desktop Action new-window]")
-        .skip(1)
-        .take_while(|l| !l.starts_with('['))
-        .find_map(|l| l.strip_prefix("Exec="))?;
+    let section = action.map_or("[Desktop Entry]".to_string(), |a| format!("[Desktop Action {a}]"));
+    let exec =
+        contents.lines().skip_while(|l| l.trim() != section).skip(1).take_while(|l| !l.starts_with('[')).find_map(|l| l.strip_prefix("Exec="))?;
     let mut words = exec.split_whitespace().map(|w| w.trim_matches('"'));
     let mut cmd = Command::new(words.next()?);
     let mut placed = false;

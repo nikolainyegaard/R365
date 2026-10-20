@@ -10,6 +10,9 @@
 
 ## Launch
 
+The access token R365 holds for the AVD gateway scope goes to FreeRDP as `/gateway:bearer:<token>`, which makes the ARM gateway code skip its own authorize round trip (`libfreerdp/core/gateway/arm.c` only fetches a token when no bearer is set). That removes one of the two browser prompts per connection; the RDS session token prompt remains, because that token is bound to a key pair only FreeRDP holds. The bearer is on the command line and visible to other local users for the hour it is valid.
+
+
 `core::rdp::build_args` produces the argument list after the binary. It is JW365's list (see NOTICE): `/gateway:type:arm /sec:aad`, PulseAudio at 48 kHz, `/gdi:sw /bpp:32`, H.264 progressive with RemoteFX, auto-reconnect, `/prevent-session-lock:120`, `/wm-class:r365` so the session window groups with the app. Fullscreen and multi-monitor drop `/scale-desktop` and `+dynamic-resolution`, which FreeRDP rejects in combination.
 
 The downloaded `.rdp` is rewritten by `core::rdp::prepare_profile` into `<name>.active.rdp`: smartcard, USB and clipboard lines are zeroed when the setting is off, which stops FreeRDP polling an absent smartcard service (`SCARD_E_NO_SERVICE` loops).

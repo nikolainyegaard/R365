@@ -53,8 +53,16 @@ pub fn prepare_profile(contents: &str, opts: &LaunchOptions) -> String {
 }
 
 /// Arguments after the FreeRDP binary. The .rdp file comes first, as FreeRDP requires.
-pub fn build_args(rdp_file: &str, username: &str, title: &str, opts: &LaunchOptions) -> crate::Result<Vec<String>> {
+///
+/// `gateway_token` is the access token for the AVD gateway scope. Given, FreeRDP uses it as
+/// the ARM gateway bearer and skips its own browser round trip for it, leaving only the
+/// session token prompt. It ends up on the command line, readable by other local users for
+/// the hour it is valid.
+pub fn build_args(rdp_file: &str, username: &str, title: &str, opts: &LaunchOptions, gateway_token: Option<&str>) -> crate::Result<Vec<String>> {
     let mut a: Vec<String> = vec![rdp_file.into(), "/gateway:type:arm".into(), "/sec:aad".into()];
+    if let Some(token) = gateway_token.map(str::trim).filter(|t| !t.is_empty() && !t.contains([',', ' ', '\n'])) {
+        a.push(format!("/gateway:bearer:{token}"));
+    }
     if opts.broker_redirect {
         // FreeRDP's CLI builds its authorize URL from this printf format (the default is the
         // nativeclient page); a format without placeholders is valid C and ignores the arguments.
@@ -181,7 +189,7 @@ pub fn is_reconnecting_marker(line: &str) -> bool {
 /// Masks codes and tokens before a line reaches the session log.
 pub fn redact(line: &str) -> String {
     let mut out = line.to_string();
-    for key in ["code=", "access_token=", "refresh_token=", "id_token=", "token=", "/p:"] {
+    for key in ["code=", "access_token=", "refresh_token=", "id_token=", "token=", "/p:", "bearer:"] {
         let mut from = 0;
         while let Some(pos) = out.get(from..).and_then(|s| s.find(key)).map(|p| p + from) {
             let start = pos + key.len();
@@ -260,7 +268,8 @@ mod tests {
 
     #[test]
     fn args_shape() {
-        let a = build_args("/tmp/x.rdp", "me@corp.com", "PC", &opts()).unwrap();
+        let a = build_args("/tmp/x.rdp", "me@corp.com", "PC", &opts(), Some("tok.en")).unwrap();
+        assert!(a.contains(&"/gateway:bearer:tok.en".to_string()));
         assert_eq!(a[0], "/tmp/x.rdp");
         assert!(a.contains(&"/sec:aad".to_string()));
         assert!(a.contains(&"/u:me@corp.com".to_string()));
@@ -270,12 +279,13 @@ mod tests {
         assert!(!a.contains(&"/f".to_string()));
         let mut o = opts();
         o.multi_monitor = true;
-        let a = build_args("x", "", "PC", &o).unwrap();
+        let a = build_args("x", "", "PC", &o, None).unwrap();
+        assert!(!a.iter().any(|x| x.starts_with("/gateway:bearer:")));
         assert!(a.contains(&"/multimon:force".to_string()));
         assert!(!a.iter().any(|s| s.starts_with("/scale-desktop")));
         assert!(!a.iter().any(|s| s.starts_with("/u:")));
         o.extra_args = vec!["bad\narg".into()];
-        assert!(build_args("x", "", "PC", &o).is_err());
+        assert!(build_args("x", "", "PC", &o, None).is_err());
     }
 
     #[test]
@@ -292,5 +302,6 @@ mod tests {
         assert!(is_connected_marker("[INFO] Logon Info V2"));
         assert!(is_reconnecting_marker("auto-reconnect in progress"));
         assert_eq!(redact("https://x/?code=abc&state=1 Bearer tok,"), "https://x/?code=[REDACTED]&state=1 Bearer [REDACTED],");
+        assert_eq!(redact("/gateway:bearer:abc.def /f"), "/gateway:bearer:[REDACTED] /f");
     }
 }

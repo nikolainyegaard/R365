@@ -78,7 +78,19 @@ pub struct App {
     pub confirm_sign_out: bool,
     pub error_dialog: Option<String>,
     pub last_sync: Option<Instant>,
+    /// A browser launch waiting for an activation token from the window system.
+    browser_launch: Option<BrowserLaunch>,
+    token_requested: bool,
 }
+
+struct BrowserLaunch {
+    url: String,
+    since: Instant,
+}
+
+/// How long a browser launch waits for an activation token before going without one. The
+/// compositor answers within a frame or two; X11 and headless never answer.
+const TOKEN_WAIT: Duration = Duration::from_millis(400);
 
 impl App {
     pub fn new(ctx: egui::Context, initial_url: Option<String>) -> Self {
@@ -117,6 +129,8 @@ impl App {
             confirm_sign_out: false,
             error_dialog: None,
             last_sync: None,
+            browser_launch: None,
+            token_requested: false,
         };
         if app.tokens.is_some() {
             app.refresh_workspaces();
@@ -164,6 +178,9 @@ impl App {
         }
         while let Ok(url) = self.ipc_rx.try_recv() {
             self.deliver_redirect(&url);
+        }
+        if self.browser_launch.as_ref().is_some_and(|b| b.since.elapsed() >= TOKEN_WAIT) {
+            self.launch_browser(None);
         }
         let due = self.last_sync.is_some_and(|t| t.elapsed() > Duration::from_secs(u64::from(self.config.auto_refresh_minutes.max(1)) * 60));
         if due && !self.loading && self.signed_in() {
@@ -232,7 +249,7 @@ impl App {
             }
             SessionEvent::AuthRequired(url) => {
                 let title = self.title_of(&key);
-                let _ = browser::open(&url);
+                self.open_browser(&url);
                 self.pending_auth = Some(PendingAuth { key, title, url, paste: String::new(), started: Instant::now() });
             }
             SessionEvent::Exited(_) => {
@@ -246,6 +263,33 @@ impl App {
 
     fn title_of(&self, key: &str) -> String {
         self.workspaces.iter().flat_map(|w| &w.resources).find(|r| r.key() == key).map(|r| r.title.clone()).unwrap_or_else(|| "Cloud PC".into())
+    }
+
+    /// Opens `url` in the browser once the shell has had a chance to fetch an activation token.
+    fn open_browser(&mut self, url: &str) {
+        self.browser_launch = Some(BrowserLaunch { url: url.to_string(), since: Instant::now() });
+        self.token_requested = true;
+        self.ctx.request_repaint_after(TOKEN_WAIT);
+    }
+
+    /// The shell asks this every frame and calls eframe's token request when it is true.
+    pub fn take_token_request(&mut self) -> bool {
+        std::mem::take(&mut self.token_requested)
+    }
+
+    /// The shell hands over the token the window system answered with.
+    pub fn deliver_activation_token(&mut self, token: String) {
+        if self.browser_launch.is_some() {
+            self.launch_browser(Some(&token));
+        }
+    }
+
+    fn launch_browser(&mut self, token: Option<&str>) {
+        if let Some(launch) = self.browser_launch.take()
+            && let Err(e) = browser::open(&launch.url, token)
+        {
+            self.set_status(e, Tone::Error);
+        }
     }
 
     /// Highlights R365 in the task bar: after a browser hand-off the window is behind the browser
@@ -274,17 +318,14 @@ impl App {
             }
         };
         let url = core_auth::authorize_url(&pkce, self.redirect_uri);
-        if let Err(e) = browser::open(&url) {
-            self.set_status(e, Tone::Error);
-            return;
-        }
+        self.open_browser(&url);
         self.sign_in = Some(SignIn { pkce, url, paste: String::new(), exchanging: false, started: Instant::now() });
         self.set_status("Finish signing in in your browser", Tone::Active);
     }
 
-    pub fn reopen_sign_in(&self) {
-        if let Some(s) = &self.sign_in {
-            let _ = browser::open(&s.url);
+    pub fn reopen_sign_in(&mut self) {
+        if let Some(url) = self.sign_in.as_ref().map(|s| s.url.clone()) {
+            self.open_browser(&url);
         }
     }
 
@@ -382,7 +423,18 @@ impl App {
                 let active = path.with_extension("active.rdp");
                 paths::write_private(&active, prepare_profile(&contents, &opts).as_bytes())?;
                 let _ = tx.send(Msg::Status(format!("Starting FreeRDP for {}", resource.title)));
-                freerdp::launch(&freerdp, &active, &username, &resource.title, &opts, resource.key(), stx)
+                freerdp::launch(
+                    &freerdp,
+                    freerdp::LaunchRequest {
+                        rdp_file: &active,
+                        username: &username,
+                        title: &resource.title,
+                        gateway_token: Some(&fresh.access_token),
+                        key: resource.key(),
+                    },
+                    &opts,
+                    stx,
+                )
             })();
             let _ = tx.send(Msg::Launched { key: resource.key(), result });
         });
@@ -411,9 +463,9 @@ impl App {
         }
     }
 
-    pub fn reopen_auth_url(&self) {
-        if let Some(p) = &self.pending_auth {
-            let _ = browser::open(&p.url);
+    pub fn reopen_auth_url(&mut self) {
+        if let Some(url) = self.pending_auth.as_ref().map(|p| p.url.clone()) {
+            self.open_browser(&url);
         }
     }
 
