@@ -14,6 +14,8 @@ pub fn open(url: &str, activation_token: Option<&str>) -> crate::Result<()> {
     if !url.starts_with("https://") {
         return Err("Only https links are opened".into());
     }
+    // Temporary: count launches while chasing the double auth page.
+    eprintln!("r365: browser::open token={} url={}", activation_token.is_some(), url.chars().take(80).collect::<String>());
     let mut cmd = match activation_token {
         Some(_) => desktop_command(url, None),
         None => desktop_command(url, Some("new-window")),

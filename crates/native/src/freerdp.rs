@@ -30,6 +30,15 @@ impl FreeRdp {
         }
     }
 
+    /// FreeRDP 3.33 added a "connection is being established" popup to the SDL client, on by
+    /// default; the same release added the flag that turns it off. Older clients reject the flag.
+    fn has_connection_dialog(&self) -> bool {
+        let is_sdl = self.path.as_ref().and_then(|p| p.file_name()?.to_str()).is_some_and(|n| n.starts_with("sdl-freerdp"));
+        let mut parts = self.version.split('.').map(|p| p.parse::<u32>().unwrap_or(0));
+        let (major, minor) = (parts.next().unwrap_or(0), parts.next().unwrap_or(0));
+        is_sdl && (major, minor) >= (3, 33)
+    }
+
     /// The full argv for one session.
     fn argv(&self, args: Vec<String>) -> Vec<String> {
         match &self.path {
@@ -166,7 +175,10 @@ pub struct LaunchRequest<'a> {
 pub fn launch(freerdp: &FreeRdp, req: LaunchRequest<'_>, opts: &LaunchOptions, tx: Sender<(String, SessionEvent)>) -> crate::Result<Session> {
     let LaunchRequest { rdp_file, username, title, gateway_token, key } = req;
     ensure_sdl_config();
-    let args = rdp::build_args(&rdp_file.to_string_lossy(), username, title, opts, gateway_token)?;
+    let mut args = rdp::build_args(&rdp_file.to_string_lossy(), username, title, opts, gateway_token)?;
+    if freerdp.has_connection_dialog() {
+        args.push("-sdl-connection-dialog".into());
+    }
     let argv = freerdp.argv(args);
     let mut cmd = if is_executable(Path::new("/usr/bin/script")) {
         let joined = argv.iter().map(|a| format!("'{}'", a.replace('\'', "'\\''"))).collect::<Vec<_>>().join(" ");
@@ -261,6 +273,16 @@ fn sanitize(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn connection_dialog_flag_only_for_sdl_3_33_and_up() {
+        let f = |path: &str, version: &str| FreeRdp { path: Some(PathBuf::from(path)), version: version.into() };
+        assert!(f("/usr/bin/sdl-freerdp", "3.33.0").has_connection_dialog());
+        assert!(f("/usr/bin/sdl-freerdp3", "4.0.0").has_connection_dialog());
+        assert!(!f("/usr/bin/sdl-freerdp", "3.32.2").has_connection_dialog());
+        assert!(!f("/usr/bin/xfreerdp", "3.33.0").has_connection_dialog());
+        assert!(!FreeRdp { path: None, version: "3.33.0".into() }.has_connection_dialog());
+    }
 
     #[test]
     fn version_parsing() {
