@@ -22,7 +22,34 @@ pub struct FreeRdp {
     pub version: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Monitor {
+    pub id: u32,
+    pub name: String,
+    pub width: u32,
+    pub height: u32,
+    pub primary: bool,
+}
+
+impl Monitor {
+    pub fn label(&self) -> String {
+        let primary = if self.primary { " (primary)" } else { "" };
+        let name = if self.name.chars().count() > 38 { format!("{}…", self.name.chars().take(37).collect::<String>()) } else { self.name.clone() };
+        format!("{name} — {}×{}{primary}", self.width, self.height)
+    }
+}
+
 impl FreeRdp {
+    /// The monitor list exactly as the SDL client sees it, so `/monitors:<id>` uses the same ids.
+    pub fn list_monitors(&self) -> Vec<Monitor> {
+        let args = ["/list:monitor".to_string()];
+        let output = match &self.path {
+            Some(path) => Command::new(path).args(&args).output(),
+            None => Command::new("flatpak").args(["run", FLATPAK_ID]).args(&args).output(),
+        };
+        output.ok().filter(|o| o.status.success()).map(|o| parse_monitors(&String::from_utf8_lossy(&o.stdout))).unwrap_or_default()
+    }
+
     pub fn display_name(&self) -> String {
         match &self.path {
             Some(p) => format!("{} {}", p.file_name().and_then(|n| n.to_str()).unwrap_or("FreeRDP"), self.version),
@@ -266,6 +293,27 @@ fn watch(session: Session, stdout: std::process::ChildStdout, log_file: &Path, t
     crate::paths::prune_logs(10);
 }
 
+fn parse_monitors(text: &str) -> Vec<Monitor> {
+    let mut monitors = Vec::new();
+    for line in text.lines() {
+        let primary = line.trim_start().starts_with('*');
+        let Some(open) = line.find('[') else { continue };
+        let Some(close) = line.get(open + 1..).and_then(|s| s.find(']')).map(|i| open + 1 + i) else { continue };
+        let Some(id) = line.get(open + 1..close).and_then(|s| s.trim().parse::<u32>().ok()) else { continue };
+        let Some(name_open) = line.get(close + 1..).and_then(|s| s.find('[')).map(|i| close + 1 + i) else { continue };
+        let Some(name_close) = line.get(name_open + 1..).and_then(|s| s.find(']')).map(|i| name_open + 1 + i) else { continue };
+        let Some(name) = line.get(name_open + 1..name_close).map(str::trim).filter(|s| !s.is_empty()) else { continue };
+        let Some(rest) = line.get(name_close + 1..) else { continue };
+        let dimensions = rest.split_whitespace().find_map(|token| {
+            let (w, h) = token.split_once('x')?;
+            Some((w.parse::<u32>().ok()?, h.parse::<u32>().ok()?))
+        });
+        let Some((width, height)) = dimensions else { continue };
+        monitors.push(Monitor { id, name: name.to_string(), width, height, primary });
+    }
+    monitors
+}
+
 fn sanitize(s: &str) -> String {
     s.chars().map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') { c } else { '_' }).collect()
 }
@@ -289,6 +337,20 @@ mod tests {
         assert_eq!(extract_version("This is FreeRDP version 3.32.1 (n/a)").as_deref(), Some("3.32.1"));
         assert_eq!(extract_version("Version: 3.31\nBranch: stable").as_deref(), Some("3.31"));
         assert_eq!(extract_version("nothing"), None);
+    }
+
+    #[test]
+    fn monitor_list_parsing() {
+        let text = "listing 3 monitors:\n     * [3] [LG Electronics LG ULTRAFINE] 2259x1271\t+163+0\n       [4] [GIGA-BYTE TECHNOLOGY CO., LTD. M32QC DP-1] 2560x1440\t+0+1271\n";
+        let monitors = parse_monitors(text);
+        assert_eq!(monitors.len(), 2);
+        assert_eq!(monitors[0].id, 3);
+        assert!(monitors[0].primary);
+        assert_eq!(monitors[0].width, 2259);
+        assert_eq!(monitors[0].height, 1271);
+        assert_eq!(monitors[1].id, 4);
+        assert!(!monitors[1].primary);
+        assert_eq!(monitors[1].name, "GIGA-BYTE TECHNOLOGY CO., LTD. M32QC DP-1");
     }
 
     #[test]

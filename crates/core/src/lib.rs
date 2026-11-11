@@ -1,5 +1,6 @@
 //! Pure, testable logic. No network, no filesystem, no process spawning.
 
+pub mod account;
 pub mod auth;
 pub mod config;
 pub mod feed;

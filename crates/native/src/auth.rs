@@ -25,13 +25,13 @@ pub fn refresh(http: &Http, previous: &TokenSet) -> crate::Result<TokenSet> {
     TokenSet::from_response(tokens, Some(previous), crate::now_unix())
 }
 
-/// Returns a token set that is good for at least five minutes, refreshing and persisting if
-/// needed. `changed` tells the caller whether to update its copy.
-pub fn ensure_fresh(http: &Http, current: &TokenSet) -> crate::Result<(TokenSet, bool)> {
-    if !current.is_expiring_soon(crate::now_unix()) {
+/// Returns a token set that is good now, refreshing only if it has expired. `changed` tells the
+/// caller whether to update its copy.
+pub fn ensure_fresh(http: &Http, current: &TokenSet, account_id: &str) -> crate::Result<(TokenSet, bool)> {
+    if !current.is_expired(crate::now_unix()) {
         return Ok((current.clone(), false));
     }
     let fresh = refresh(http, current)?;
-    crate::secret::store(&fresh)?;
+    crate::secret::store(account_id, &fresh)?;
     Ok((fresh, true))
 }

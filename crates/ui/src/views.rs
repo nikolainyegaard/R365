@@ -5,12 +5,14 @@ use crate::theme::{self as t};
 use crate::widgets::{self, Kind};
 use egui::{Align, Align2, CornerRadius, Frame, Layout, Margin, RichText, Sense, Stroke, StrokeKind, Ui, UiBuilder, vec2};
 use r365_core::feed::Resource;
-use r365_core::rdp::{DisplayMode, SessionStatus};
+use r365_core::rdp::{ClipboardMode, DisplayMode, GfxMode, NetworkProfile, SessionStatus};
 
 enum CardAction {
     None,
     Toggle,
     Connect(DisplayMode),
+    SetDefault(DisplayMode),
+    ClearDefault,
     Disconnect,
     Restart,
     CopyId,
@@ -29,10 +31,11 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
         sign_in(app, ui);
     }
     settings_window(app, ctx);
+    account_sign_in_window(app, ctx);
     session_auth_window(app, ctx);
     sign_out_dialog(app, ctx);
     error_dialog(app, ctx);
-    if app.loading || app.signing_in() || app.pending_auth.is_some() || app.any_session_busy() {
+    if app.loading() || app.signing_in() || app.pending_auth.is_some() || app.any_session_busy() {
         ctx.request_repaint_after(std::time::Duration::from_millis(250));
     }
 }
@@ -96,7 +99,7 @@ fn sign_in(app: &mut App, root: &mut Ui) {
                 app.start_sign_in();
             }
             if widgets::button(&mut card, "Settings", Kind::Secondary, 280.0).clicked() {
-                app.settings_draft = Some(app.config.clone());
+                app.open_settings();
             }
         }
         card.add_space(8.0);
@@ -132,23 +135,67 @@ fn header(app: &mut App, root: &mut Ui) {
                 if widgets::button(ui, "Refresh", Kind::Secondary, 0.0).clicked() {
                     app.refresh_workspaces();
                 }
-                if app.loading {
+                if app.loading() {
                     ui.add(egui::Spinner::new().size(16.0).color(t::BLUE));
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
-                    if widgets::button(ui, "Sign out", Kind::Ghost, 0.0).clicked() {
-                        app.confirm_sign_out = true;
-                    }
+                    account_menu(app, ui);
                     if widgets::button(ui, "Settings", Kind::Ghost, 0.0).clicked() {
-                        app.settings_draft = Some(app.config.clone());
+                        app.open_settings();
                     }
-                    let identity = app.tokens.as_ref().map(|t| t.claims.display_identity()).unwrap_or_default();
-                    widgets::pill(ui, &identity);
                 });
             });
         },
     );
+}
+
+fn account_menu(app: &mut App, ui: &mut egui::Ui) {
+    let label = format!("{} ▾", short_label(&app.account_label(app.active), 36));
+    let mut switch_to = None;
+    let mut add = false;
+    let mut sign_out = false;
+    let mut quit = false;
+    ui.menu_button(label, |ui| {
+        ui.set_min_width(280.0);
+        for index in 0..app.accounts.len() {
+            if ui.selectable_label(index == app.active, app.account_label(index)).clicked() {
+                switch_to = Some(index);
+                ui.close();
+            }
+        }
+        ui.separator();
+        if ui.button("Add another account…").clicked() {
+            add = true;
+            ui.close();
+        }
+        let sign_out_label = app.active_account().map(|a| format!("Sign out of {}", a.info.label())).unwrap_or_else(|| "Sign out".to_string());
+        if ui.button(sign_out_label).clicked() {
+            sign_out = true;
+            ui.close();
+        }
+        ui.separator();
+        if ui.button("Quit R365").clicked() {
+            quit = true;
+            ui.close();
+        }
+    });
+    if let Some(index) = switch_to {
+        app.set_active(index);
+    }
+    if add {
+        app.start_add_account();
+    }
+    if sign_out {
+        app.confirm_sign_out = true;
+    }
+    if quit {
+        app.quit();
+    }
+}
+
+fn short_label(text: &str, max: usize) -> String {
+    if text.chars().count() <= max { text.to_string() } else { format!("{}…", text.chars().take(max.saturating_sub(1)).collect::<String>()) }
 }
 
 fn status_bar(app: &mut App, root: &mut Ui) {
@@ -167,7 +214,7 @@ fn status_bar(app: &mut App, root: &mut Ui) {
                 }
                 widgets::text(ui, &app.status, 11.0, tone_color(app.tone));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let synced = match app.last_sync {
+                    let synced = match app.last_sync() {
                         None => "Not synced".to_string(),
                         Some(at) if at.elapsed().as_secs() < 60 => "Synced just now".to_string(),
                         Some(at) => format!("Synced {}m ago", at.elapsed().as_secs() / 60),
@@ -191,7 +238,7 @@ fn grid(app: &mut App, root: &mut Ui) {
             let query = app.search.trim().to_lowercase();
             let mut actions: Vec<(Resource, CardAction)> = Vec::new();
             let mut matched = 0;
-            let workspaces = app.workspaces.clone();
+            let workspaces = app.workspaces().to_vec();
             for ws in &workspaces {
                 let shown: Vec<&Resource> = ws
                     .resources
@@ -213,7 +260,7 @@ fn grid(app: &mut App, root: &mut Ui) {
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = vec2(16.0, 16.0);
                     for r in shown {
-                        let action = card(ui, r, app.status_of(&r.key()));
+                        let action = card(ui, r, app.status_of(&r.key()), app.resource_mode(&r.key()));
                         if !matches!(action, CardAction::None) {
                             actions.push((r.clone(), action));
                         }
@@ -256,6 +303,8 @@ fn apply(app: &mut App, ctx: &egui::Context, r: &Resource, action: CardAction) {
             }
         }
         CardAction::Connect(mode) => app.connect(r, mode),
+        CardAction::SetDefault(mode) => app.set_resource_mode(&key, Some(mode)),
+        CardAction::ClearDefault => app.set_resource_mode(&key, None),
         CardAction::Disconnect => app.disconnect(&key),
         CardAction::Restart => app.restart(r),
         CardAction::CopyId => ctx.copy_text(r.id.clone()),
@@ -269,7 +318,7 @@ fn apply(app: &mut App, ctx: &egui::Context, r: &Resource, action: CardAction) {
     }
 }
 
-fn card(ui: &mut Ui, r: &Resource, status: SessionStatus) -> CardAction {
+fn card(ui: &mut Ui, r: &Resource, status: SessionStatus, default_mode: Option<DisplayMode>) -> CardAction {
     let size = vec2(220.0, 206.0);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
     let hovered = resp.hovered() || ui.rect_contains_pointer(rect);
@@ -327,6 +376,15 @@ fn card(ui: &mut Ui, r: &Resource, status: SessionStatus) -> CardAction {
                 ui.close();
             }
         }
+        ui.menu_button("Default display", |ui| {
+            let selected = default_mode.unwrap_or(DisplayMode::Default);
+            for mode in [DisplayMode::Default, DisplayMode::Fullscreen, DisplayMode::Windowed, DisplayMode::MultiMonitor] {
+                if ui.selectable_label(selected == mode, mode.label()).clicked() {
+                    action = if mode == DisplayMode::Default { CardAction::ClearDefault } else { CardAction::SetDefault(mode) };
+                    ui.close();
+                }
+            }
+        });
         ui.separator();
         if ui.button("Restart session").clicked() {
             action = CardAction::Restart;
@@ -363,48 +421,138 @@ fn dialog<R>(ctx: &egui::Context, title: &str, width: f32, add: impl FnOnce(&mut
 fn settings_window(app: &mut App, ctx: &egui::Context) {
     let Some(mut draft) = app.settings_draft.take() else { return };
     let mut outcome: Option<bool> = None;
-    dialog(ctx, "Settings", 420.0, |ui| {
-        ui.spacing_mut().item_spacing.y = 8.0;
-        widgets::text(ui, "DISPLAY", 11.0, t::TEXT_MUTED);
-        ui.checkbox(&mut draft.fullscreen, "Start sessions fullscreen");
-        ui.checkbox(&mut draft.multi_monitor, "Use all monitors (implies fullscreen)");
-        ui.checkbox(&mut draft.dynamic_resolution, "Resize the remote desktop with the window");
-        ui.horizontal(|ui| {
-            widgets::text(ui, "Scale", 13.0, t::TEXT);
-            ui.add(egui::Slider::new(&mut draft.scale_percent, 0..=200).step_by(25.0).suffix("%"));
-            widgets::text(ui, if draft.scale_percent == 0 { "(off)" } else { "" }, 11.0, t::TEXT_MUTED);
+    let max_body = (ctx.content_rect().height() - 210.0).max(260.0);
+    dialog(ctx, "Settings", 460.0, |ui| {
+        egui::ScrollArea::vertical().max_height(max_body).auto_shrink([false, true]).show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 8.0;
+            widgets::text(ui, "DISPLAY", 11.0, t::TEXT_MUTED);
+            ui.checkbox(&mut draft.fullscreen, "Start sessions fullscreen");
+            if ui.checkbox(&mut draft.multi_monitor, "Use all monitors (implies fullscreen)").changed() && draft.multi_monitor {
+                draft.monitor_ids.clear();
+            }
+            ui.checkbox(&mut draft.dynamic_resolution, "Resize the remote desktop with the window");
+            ui.horizontal(|ui| {
+                widgets::text(ui, "Scale", 13.0, t::TEXT);
+                ui.add(egui::Slider::new(&mut draft.scale_percent, 0..=200).step_by(25.0).suffix("%"));
+                widgets::text(ui, if draft.scale_percent == 0 { "(off)" } else { "" }, 11.0, t::TEXT_MUTED);
+            });
+            if app.monitors.is_empty() {
+                widgets::text(ui, "No monitors detected; FreeRDP will use the current monitor.", 11.0, t::TEXT_MUTED);
+            } else {
+                widgets::text(ui, "FULLSCREEN MONITORS", 11.0, t::TEXT_MUTED);
+                let selectable = !draft.multi_monitor;
+                ui.add_enabled_ui(selectable, |ui| {
+                    for monitor in &app.monitors {
+                        let mut checked = draft.monitor_ids.contains(&monitor.id);
+                        if ui.checkbox(&mut checked, monitor.label()).changed() {
+                            if checked {
+                                draft.monitor_ids.push(monitor.id);
+                            } else {
+                                draft.monitor_ids.retain(|id| *id != monitor.id);
+                            }
+                        }
+                    }
+                });
+                widgets::text(
+                    ui,
+                    "Select one monitor for single-monitor fullscreen, or several to span them. Leave all unchecked for the current monitor.",
+                    11.0,
+                    t::TEXT_MUTED,
+                );
+            }
+            ui.add_space(6.0);
+            widgets::text(ui, "DEVICES", 11.0, t::TEXT_MUTED);
+            ui.checkbox(&mut draft.sound, "Sound");
+            if draft.sound {
+                audio_combo(ui, "sound_device", &mut draft.sound_device, &app.audio_sinks, "System default output");
+            }
+            ui.checkbox(&mut draft.microphone, "Microphone");
+            if draft.microphone {
+                audio_combo(ui, "microphone_device", &mut draft.microphone_device, &app.audio_sources, "System default input");
+            }
+            ui.checkbox(&mut draft.camera, "Camera");
+            ui.horizontal(|ui| {
+                widgets::text(ui, "Clipboard", 13.0, t::TEXT);
+                egui::ComboBox::from_id_salt("clipboard_mode").selected_text(draft.clipboard_mode.label()).show_ui(ui, |ui| {
+                    for mode in [ClipboardMode::Both, ClipboardMode::LocalToRemote, ClipboardMode::RemoteToLocal, ClipboardMode::Off] {
+                        ui.selectable_value(&mut draft.clipboard_mode, mode, mode.label());
+                    }
+                });
+            });
+            ui.checkbox(&mut draft.usb_redirection, "USB device redirection");
+            ui.checkbox(&mut draft.smartcard, "Smart card");
+            widgets::text(ui, "SHARED FOLDERS", 11.0, t::TEXT_MUTED);
+            let mut remove_drive = None;
+            for (index, path) in draft.drive_paths.iter().enumerate() {
+                ui.horizontal(|ui| {
+                    widgets::text(ui, &short_label(path, 46), 12.0, t::TEXT_SECONDARY);
+                    if widgets::button(ui, "Remove", Kind::Ghost, 60.0).clicked() {
+                        remove_drive = Some(index);
+                    }
+                });
+            }
+            if let Some(index) = remove_drive {
+                draft.drive_paths.remove(index);
+            }
+            ui.horizontal(|ui| {
+                ui.add(egui::TextEdit::singleline(&mut app.drive_input).hint_text("/home/rodrigo/Documents").desired_width(280.0));
+                if widgets::button(ui, "Add", Kind::Secondary, 50.0).clicked() && !app.drive_input.trim().is_empty() {
+                    draft.drive_paths.push(app.drive_input.trim().to_string());
+                    app.drive_input.clear();
+                }
+            });
+            widgets::text(ui, "Folders are shared with the session as r365_1, r365_2, …", 11.0, t::TEXT_MUTED);
+            ui.add_space(6.0);
+            widgets::text(ui, "CONNECTION", 11.0, t::TEXT_MUTED);
+            ui.checkbox(&mut draft.auto_reconnect, "Reconnect automatically");
+            ui.checkbox(&mut draft.prevent_session_lock, "Keep the session from idling out");
+            ui.horizontal(|ui| {
+                widgets::text(ui, "Graphics", 13.0, t::TEXT);
+                egui::ComboBox::from_id_salt("gfx_mode").selected_text(draft.gfx_mode.label()).show_ui(ui, |ui| {
+                    for mode in [GfxMode::Avc420, GfxMode::Avc444, GfxMode::Off] {
+                        ui.selectable_value(&mut draft.gfx_mode, mode, mode.label());
+                    }
+                });
+            });
+            ui.horizontal(|ui| {
+                widgets::text(ui, "Network", 13.0, t::TEXT);
+                egui::ComboBox::from_id_salt("network_profile").selected_text(draft.network_profile.label()).show_ui(ui, |ui| {
+                    for profile in [NetworkProfile::Auto, NetworkProfile::Lan, NetworkProfile::Wan, NetworkProfile::LowBandwidth] {
+                        ui.selectable_value(&mut draft.network_profile, profile, profile.label());
+                    }
+                });
+            });
+            ui.checkbox(&mut draft.low_bandwidth_visuals, "Reduce visual effects (wallpaper, themes, animations)");
+            ui.checkbox(&mut draft.ignore_cert, "Ignore certificate errors");
+            ui.horizontal(|ui| {
+                widgets::text(ui, "Refresh every", 13.0, t::TEXT);
+                ui.add(egui::DragValue::new(&mut draft.auto_refresh_minutes).range(1..=240).suffix(" min"));
+            });
+            ui.add_space(6.0);
+            widgets::text(ui, "STARTUP", 11.0, t::TEXT_MUTED);
+            ui.checkbox(&mut draft.autostart, "Start R365 at login");
+            ui.add_enabled_ui(draft.autostart, |ui| {
+                ui.checkbox(&mut draft.start_minimized, "Start minimized");
+            });
+            ui.checkbox(&mut draft.close_to_tray, "Keep running when the window is closed");
+            widgets::text(ui, "Launch r365 again to bring a hidden window back.", 11.0, t::TEXT_MUTED);
+            ui.add_space(6.0);
+            widgets::text(ui, "FREERDP", 11.0, t::TEXT_MUTED);
+            ui.add(
+                egui::TextEdit::singleline(&mut draft.freerdp_path)
+                    .hint_text("Detect automatically, or a binary path, or \"flatpak\"")
+                    .desired_width(f32::INFINITY),
+            );
+            let detected = app.freerdp.as_ref().map(|f| f.display_name()).unwrap_or_else(|| "none detected".into());
+            widgets::text(ui, &format!("Detected: {detected}"), 11.0, t::TEXT_MUTED);
+            let mut extra = draft.extra_args.join(" ");
+            if ui.add(egui::TextEdit::singleline(&mut extra).hint_text("Extra FreeRDP arguments").desired_width(f32::INFINITY)).changed() {
+                draft.extra_args = extra.split_whitespace().map(str::to_string).collect();
+            }
+            ui.add_space(4.0);
         });
-        ui.add_space(6.0);
-        widgets::text(ui, "DEVICES", 11.0, t::TEXT_MUTED);
-        ui.checkbox(&mut draft.sound, "Sound");
-        ui.checkbox(&mut draft.microphone, "Microphone");
-        ui.checkbox(&mut draft.clipboard, "Clipboard");
-        ui.checkbox(&mut draft.usb_redirection, "USB device redirection");
-        ui.checkbox(&mut draft.smartcard, "Smart card");
-        ui.add_space(6.0);
-        widgets::text(ui, "CONNECTION", 11.0, t::TEXT_MUTED);
-        ui.checkbox(&mut draft.auto_reconnect, "Reconnect automatically");
-        ui.checkbox(&mut draft.prevent_session_lock, "Keep the session from idling out");
-        ui.checkbox(&mut draft.gfx_progressive, "H.264 progressive graphics");
-        ui.checkbox(&mut draft.ignore_cert, "Ignore certificate errors");
-        ui.horizontal(|ui| {
-            widgets::text(ui, "Refresh every", 13.0, t::TEXT);
-            ui.add(egui::DragValue::new(&mut draft.auto_refresh_minutes).range(1..=240).suffix(" min"));
-        });
-        ui.add_space(6.0);
-        widgets::text(ui, "FREERDP", 11.0, t::TEXT_MUTED);
-        ui.add(
-            egui::TextEdit::singleline(&mut draft.freerdp_path)
-                .hint_text("Detect automatically, or a binary path, or \"flatpak\"")
-                .desired_width(f32::INFINITY),
-        );
-        let detected = app.freerdp.as_ref().map(|f| f.display_name()).unwrap_or_else(|| "none detected".into());
-        widgets::text(ui, &format!("Detected: {detected}"), 11.0, t::TEXT_MUTED);
-        let mut extra = draft.extra_args.join(" ");
-        if ui.add(egui::TextEdit::singleline(&mut extra).hint_text("Extra FreeRDP arguments").desired_width(f32::INFINITY)).changed() {
-            draft.extra_args = extra.split_whitespace().map(str::to_string).collect();
-        }
-        ui.add_space(10.0);
+        ui.add_space(8.0);
+        ui.separator();
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if widgets::button(ui, "Save", Kind::Primary, 90.0).clicked() {
                 outcome = Some(true);
@@ -418,6 +566,77 @@ fn settings_window(app: &mut App, ctx: &egui::Context) {
         Some(true) => app.save_settings(draft),
         Some(false) => {}
         None => app.settings_draft = Some(draft),
+    }
+}
+
+fn audio_combo(ui: &mut Ui, id: &str, current: &mut String, devices: &[String], default_label: &str) {
+    let selected = if current.is_empty() { default_label.to_string() } else { current.clone() };
+    egui::ComboBox::from_id_salt(id).selected_text(selected).width(360.0).show_ui(ui, |ui| {
+        ui.selectable_value(current, String::new(), default_label);
+        for device in devices {
+            ui.selectable_value(current, device.clone(), device);
+        }
+    });
+}
+
+fn account_sign_in_window(app: &mut App, ctx: &egui::Context) {
+    if !app.signing_in() || !app.signed_in() {
+        return;
+    }
+    let Some(sign_in) = app.sign_in.as_ref() else { return };
+    let handler_ready = app.handler_ready;
+    let exchanging = sign_in.exchanging;
+    let show_fallback = !exchanging && sign_in.started.elapsed() >= FALLBACK_AFTER;
+    let mut paste = sign_in.paste.clone();
+    let mut submit = false;
+    let mut reopen = false;
+    let mut cancel = false;
+    dialog(ctx, "Add another account", 500.0, |ui| {
+        ui.spacing_mut().item_spacing.y = 10.0;
+        let lead = if handler_ready {
+            "Sign in with the other company's Microsoft account in the browser window that opened. If the browser asks, let it open the link with R365. This dialog closes by itself."
+        } else {
+            "Sign in with the other company's Microsoft account in the browser window that opened, then copy the address of the page you land on and paste it below."
+        };
+        ui.add(egui::Label::new(RichText::new(lead).size(13.0).color(t::TEXT_SECONDARY)).wrap());
+        if exchanging {
+            ui.horizontal(|ui| {
+                ui.add(egui::Spinner::new().size(16.0).color(t::BLUE));
+                widgets::text(ui, "Completing sign-in", 12.0, t::TEXT_SECONDARY);
+            });
+        }
+        if show_fallback {
+            if handler_ready {
+                widgets::text(ui, "Browser did not hand the sign-in back? Paste the address it ended on:", 11.0, t::TEXT_MUTED);
+            }
+            let edit = ui.add(egui::TextEdit::singleline(&mut paste).hint_text("...?code=...&state=...").desired_width(f32::INFINITY));
+            if edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                submit = true;
+            }
+        }
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if show_fallback && ui.add_enabled_ui(paste.contains("code="), |ui| widgets::button(ui, "Continue", Kind::Primary, 100.0)).inner.clicked()
+            {
+                submit = true;
+            }
+            if widgets::button(ui, "Open browser again", Kind::Secondary, 0.0).clicked() {
+                reopen = true;
+            }
+            if widgets::button(ui, "Cancel", Kind::Ghost, 0.0).clicked() {
+                cancel = true;
+            }
+        });
+    });
+    if let Some(sign_in) = app.sign_in.as_mut() {
+        sign_in.paste = paste;
+    }
+    if reopen {
+        app.reopen_sign_in();
+    }
+    if submit {
+        app.submit_pasted();
+    } else if cancel {
+        app.cancel_sign_in();
     }
 }
 
@@ -478,9 +697,17 @@ fn sign_out_dialog(app: &mut App, ctx: &egui::Context) {
     if !app.confirm_sign_out {
         return;
     }
+    let label = app.active_account().map(|a| a.info.label().to_string()).unwrap_or_default();
+    let message = if app.accounts.len() > 1 {
+        format!("Sign out of {label}? Sessions started by this account will be disconnected. Your other accounts stay signed in.")
+    } else if label.is_empty() {
+        "Sign out of Windows 365 and AVD? Running sessions will be disconnected.".to_string()
+    } else {
+        format!("Sign out of {label}? Running sessions will be disconnected.")
+    };
     let mut choice: Option<bool> = None;
-    dialog(ctx, "Sign out", 380.0, |ui| {
-        widgets::text(ui, "Sign out of Windows 365 and AVD? Running sessions will be disconnected.", 13.0, t::TEXT_SECONDARY);
+    dialog(ctx, "Sign out", 420.0, |ui| {
+        widgets::text(ui, &message, 13.0, t::TEXT_SECONDARY);
         ui.add_space(10.0);
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if widgets::button(ui, "Sign out", Kind::Primary, 100.0).clicked() {

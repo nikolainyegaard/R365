@@ -1,6 +1,9 @@
 //! Everything that touches the operating system. Nothing here opens a window.
 
+pub mod accounts;
+pub mod audio;
 pub mod auth;
+pub mod autostart;
 pub mod browser;
 pub mod feed;
 pub mod freerdp;

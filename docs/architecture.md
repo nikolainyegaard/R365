@@ -17,20 +17,24 @@ Layering: `core` depends on nothing in the workspace. `native` uses `core`. `ui`
 
 ```
 crates/core/src/auth.rs      client ID, scopes, redirect URIs, PKCE, authorize URL, code and refresh forms, redirect and token parsing, id_token claims, TokenSet
+crates/core/src/account.rs   local account identity derived from UPN and tenant; account-menu labels
 crates/core/src/feed.rs      feed discovery and workspace XML parsing, Microsoft host allowlist
 crates/core/src/rdp.rs       launch options, .rdp rewriting, FreeRDP argv, stdout markers, log redaction, SessionStatus
 crates/core/src/config.rs    ClientConfig with defaults, DisplayMode to LaunchOptions
 crates/native/src/http.rs    one blocking client; manual redirects that never carry the bearer token across origins
 crates/native/src/auth.rs    PKCE randomness, code exchange, refresh, ensure_fresh
+crates/native/src/audio.rs   PulseAudio/PipeWire sink and source names for the settings pickers
+crates/native/src/autostart.rs XDG login entry
+crates/native/src/accounts.rs saved account metadata in accounts.json
 crates/native/src/handler.rs r365.desktop and the ms-appx-web scheme registration
 crates/native/src/ipc.rs     single instance over a Unix socket; a second process forwards its URL argument
-crates/native/src/secret.rs  refresh token in the keyring via secret-tool, file fallback
-crates/native/src/feed.rs    discovery, per-tenant fetch, .rdp download, on-disk cache
-crates/native/src/freerdp.rs locate a client, spawn it under `script`, parse its output into SessionEvents
+crates/native/src/secret.rs  per-account refresh token in the keyring via secret-tool, file fallback
+crates/native/src/feed.rs    discovery, per-tenant fetch, .rdp download, per-account feed cache
+crates/native/src/freerdp.rs locate a client, list its monitors, spawn it under `script`, parse its output into SessionEvents
 crates/native/src/paths.rs   XDG dirs under r365/, private file writes, log pruning
 crates/native/src/browser.rs xdg-open for https only
-crates/ui/src/app.rs         App state, Msg channel, the sign-in, refresh, connect and disconnect flows
-crates/ui/src/views.rs       sign-in screen, header, grid, cards, status bar, dialogs
+crates/ui/src/app.rs         App state, accounts, monitor list, Msg channel, sign-in, refresh, connect and disconnect flows
+crates/ui/src/views.rs       sign-in screen, header and account menu, grid, cards, status bar, dialogs
 crates/ui/src/theme.rs       colour tokens and egui style
 crates/ui/src/widgets.rs     button, badge, pill, monitor glyph
 apps/r365/src/main.rs        viewport options and the eframe App impl
@@ -55,11 +59,17 @@ Everything else is the standard library: `secret-tool`, `xdg-open`, `script` and
 ## Runtime data
 
 ```
-~/.config/r365/config.json          settings
-~/.local/share/r365/workspaces.json last good feed, shown at startup before the refresh lands
+~/.config/r365/config.json          settings, including the last active account
+~/.config/autostart/r365.desktop    login entry when "Start R365 at login" is enabled
+~/.local/share/r365/accounts.json   saved account identities (no tokens)
+~/.local/share/r365/workspaces_<account>.json  last good feed per account
 ~/.local/share/r365/feed/           downloaded .rdp profiles and their .active.rdp rewrites
 ~/.local/share/r365/logs/           session logs, newest ten kept, tokens redacted
-~/.local/share/r365/tokens.json     only when the keyring is unavailable
+~/.local/share/r365/tokens_<account>.json  only when the keyring is unavailable
 ~/.local/share/applications/r365.desktop   the scheme handler entry, rewritten when the binary moves
 $XDG_RUNTIME_DIR/r365.sock          the single-instance socket
 ```
+
+Each signed-in account has its own keyring entry (`service=r365 account=<id>`), feed cache and
+saved workspaces. Sessions are global and tagged with the account that launched them, so signing
+one account out disconnects only that account's sessions.
