@@ -104,6 +104,7 @@ pub struct App {
     pub tone: Tone,
     pub search: String,
     pub settings_draft: Option<ClientConfig>,
+    pub settings_epoch: u64,
     pub confirm_sign_out: bool,
     pub error_dialog: Option<String>,
     /// A browser launch waiting for an activation token from the window system.
@@ -163,6 +164,7 @@ impl App {
             tone: Tone::Neutral,
             search: String::new(),
             settings_draft: None,
+            settings_epoch: 0,
             confirm_sign_out: false,
             error_dialog: None,
             browser_launch: None,
@@ -785,6 +787,7 @@ impl App {
     }
 
     pub fn open_settings(&mut self) {
+        self.settings_epoch = self.settings_epoch.wrapping_add(1);
         self.refresh_monitors();
         self.audio_sinks = audio::sinks();
         self.audio_sources = audio::sources();

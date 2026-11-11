@@ -421,147 +421,157 @@ fn dialog<R>(ctx: &egui::Context, title: &str, width: f32, add: impl FnOnce(&mut
 fn settings_window(app: &mut App, ctx: &egui::Context) {
     let Some(mut draft) = app.settings_draft.take() else { return };
     let mut outcome: Option<bool> = None;
-    let max_body = (ctx.content_rect().height() - 210.0).max(260.0);
-    dialog(ctx, "Settings", 460.0, |ui| {
-        egui::ScrollArea::vertical().max_height(max_body).auto_shrink([false, true]).show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = 8.0;
-            widgets::text(ui, "DISPLAY", 11.0, t::TEXT_MUTED);
-            ui.checkbox(&mut draft.fullscreen, "Start sessions fullscreen");
-            if ui.checkbox(&mut draft.multi_monitor, "Use all monitors (implies fullscreen)").changed() && draft.multi_monitor {
-                draft.monitor_ids.clear();
-            }
-            ui.checkbox(&mut draft.dynamic_resolution, "Resize the remote desktop with the window");
-            ui.horizontal(|ui| {
-                widgets::text(ui, "Scale", 13.0, t::TEXT);
-                ui.add(egui::Slider::new(&mut draft.scale_percent, 0..=200).step_by(25.0).suffix("%"));
-                widgets::text(ui, if draft.scale_percent == 0 { "(off)" } else { "" }, 11.0, t::TEXT_MUTED);
-            });
-            if app.monitors.is_empty() {
-                widgets::text(ui, "No monitors detected; FreeRDP will use the current monitor.", 11.0, t::TEXT_MUTED);
-            } else {
-                widgets::text(ui, "FULLSCREEN MONITORS", 11.0, t::TEXT_MUTED);
-                let selectable = !draft.multi_monitor;
-                ui.add_enabled_ui(selectable, |ui| {
-                    for monitor in &app.monitors {
-                        let mut checked = draft.monitor_ids.contains(&monitor.id);
-                        if ui.checkbox(&mut checked, monitor.label()).changed() {
-                            if checked {
-                                draft.monitor_ids.push(monitor.id);
-                            } else {
-                                draft.monitor_ids.retain(|id| *id != monitor.id);
+    let avail = ctx.content_rect();
+    let size = vec2((avail.width() - 48.0).max(620.0), (avail.height() - 48.0).max(460.0));
+    let epoch = app.settings_epoch;
+    egui::Window::new(RichText::new("Settings").size(16.0).strong())
+        .collapsible(false)
+        .resizable(false)
+        .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
+        .fixed_size(size)
+        .frame(Frame::new().fill(t::SURFACE).stroke(t::hairline()).corner_radius(CornerRadius::same(t::CARD_RADIUS)).inner_margin(Margin::same(20)))
+        .show(ctx, |ui| {
+            let body_height = (ui.available_height() - 52.0).max(140.0);
+            egui::ScrollArea::vertical().id_salt(("settings", epoch)).max_height(body_height).auto_shrink([false, false]).show(ui, |ui| {
+                ui.set_min_width((size.x - 56.0).max(420.0));
+                ui.spacing_mut().item_spacing.y = 8.0;
+                widgets::text(ui, "DISPLAY", 11.0, t::TEXT_MUTED);
+                ui.checkbox(&mut draft.fullscreen, "Start sessions fullscreen");
+                if ui.checkbox(&mut draft.multi_monitor, "Use all monitors (implies fullscreen)").changed() && draft.multi_monitor {
+                    draft.monitor_ids.clear();
+                }
+                ui.checkbox(&mut draft.dynamic_resolution, "Resize the remote desktop with the window");
+                ui.horizontal(|ui| {
+                    widgets::text(ui, "Scale", 13.0, t::TEXT);
+                    ui.add(egui::Slider::new(&mut draft.scale_percent, 0..=200).step_by(25.0).suffix("%"));
+                    widgets::text(ui, if draft.scale_percent == 0 { "(off)" } else { "" }, 11.0, t::TEXT_MUTED);
+                });
+                if app.monitors.is_empty() {
+                    widgets::text(ui, "No monitors detected; FreeRDP will use the current monitor.", 11.0, t::TEXT_MUTED);
+                } else {
+                    widgets::text(ui, "FULLSCREEN MONITORS", 11.0, t::TEXT_MUTED);
+                    let selectable = !draft.multi_monitor;
+                    ui.add_enabled_ui(selectable, |ui| {
+                        for monitor in &app.monitors {
+                            let mut checked = draft.monitor_ids.contains(&monitor.id);
+                            if ui.checkbox(&mut checked, monitor.label()).changed() {
+                                if checked {
+                                    draft.monitor_ids.push(monitor.id);
+                                } else {
+                                    draft.monitor_ids.retain(|id| *id != monitor.id);
+                                }
                             }
                         }
-                    }
-                });
-                widgets::text(
-                    ui,
-                    "Select one monitor for single-monitor fullscreen, or several to span them. Leave all unchecked for the current monitor.",
-                    11.0,
-                    t::TEXT_MUTED,
-                );
-            }
-            ui.add_space(6.0);
-            widgets::text(ui, "DEVICES", 11.0, t::TEXT_MUTED);
-            ui.checkbox(&mut draft.sound, "Sound");
-            if draft.sound {
-                audio_combo(ui, "sound_device", &mut draft.sound_device, &app.audio_sinks, "System default output");
-            }
-            ui.checkbox(&mut draft.microphone, "Microphone");
-            if draft.microphone {
-                audio_combo(ui, "microphone_device", &mut draft.microphone_device, &app.audio_sources, "System default input");
-            }
-            ui.checkbox(&mut draft.camera, "Camera");
-            ui.horizontal(|ui| {
-                widgets::text(ui, "Clipboard", 13.0, t::TEXT);
-                egui::ComboBox::from_id_salt("clipboard_mode").selected_text(draft.clipboard_mode.label()).show_ui(ui, |ui| {
-                    for mode in [ClipboardMode::Both, ClipboardMode::LocalToRemote, ClipboardMode::RemoteToLocal, ClipboardMode::Off] {
-                        ui.selectable_value(&mut draft.clipboard_mode, mode, mode.label());
-                    }
-                });
-            });
-            ui.checkbox(&mut draft.usb_redirection, "USB device redirection");
-            ui.checkbox(&mut draft.smartcard, "Smart card");
-            widgets::text(ui, "SHARED FOLDERS", 11.0, t::TEXT_MUTED);
-            let mut remove_drive = None;
-            for (index, path) in draft.drive_paths.iter().enumerate() {
+                    });
+                    widgets::text(
+                        ui,
+                        "Select one monitor for single-monitor fullscreen, or several to span them. Leave all unchecked for the current monitor.",
+                        11.0,
+                        t::TEXT_MUTED,
+                    );
+                }
+                ui.add_space(6.0);
+                widgets::text(ui, "DEVICES", 11.0, t::TEXT_MUTED);
+                ui.checkbox(&mut draft.sound, "Sound");
+                if draft.sound {
+                    audio_combo(ui, "sound_device", &mut draft.sound_device, &app.audio_sinks, "System default output");
+                }
+                ui.checkbox(&mut draft.microphone, "Microphone");
+                if draft.microphone {
+                    audio_combo(ui, "microphone_device", &mut draft.microphone_device, &app.audio_sources, "System default input");
+                }
+                ui.checkbox(&mut draft.camera, "Camera");
                 ui.horizontal(|ui| {
-                    widgets::text(ui, &short_label(path, 46), 12.0, t::TEXT_SECONDARY);
-                    if widgets::button(ui, "Remove", Kind::Ghost, 60.0).clicked() {
-                        remove_drive = Some(index);
+                    widgets::text(ui, "Clipboard", 13.0, t::TEXT);
+                    egui::ComboBox::from_id_salt("clipboard_mode").selected_text(draft.clipboard_mode.label()).show_ui(ui, |ui| {
+                        for mode in [ClipboardMode::Both, ClipboardMode::LocalToRemote, ClipboardMode::RemoteToLocal, ClipboardMode::Off] {
+                            ui.selectable_value(&mut draft.clipboard_mode, mode, mode.label());
+                        }
+                    });
+                });
+                ui.checkbox(&mut draft.usb_redirection, "USB device redirection");
+                ui.checkbox(&mut draft.smartcard, "Smart card");
+                widgets::text(ui, "SHARED FOLDERS", 11.0, t::TEXT_MUTED);
+                let mut remove_drive = None;
+                for (index, path) in draft.drive_paths.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        widgets::text(ui, &short_label(path, 46), 12.0, t::TEXT_SECONDARY);
+                        if widgets::button(ui, "Remove", Kind::Ghost, 60.0).clicked() {
+                            remove_drive = Some(index);
+                        }
+                    });
+                }
+                if let Some(index) = remove_drive {
+                    draft.drive_paths.remove(index);
+                }
+                ui.horizontal(|ui| {
+                    ui.add(egui::TextEdit::singleline(&mut app.drive_input).hint_text("/home/rodrigo/Documents").desired_width(280.0));
+                    if widgets::button(ui, "Add", Kind::Secondary, 50.0).clicked() && !app.drive_input.trim().is_empty() {
+                        draft.drive_paths.push(app.drive_input.trim().to_string());
+                        app.drive_input.clear();
                     }
                 });
-            }
-            if let Some(index) = remove_drive {
-                draft.drive_paths.remove(index);
-            }
-            ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut app.drive_input).hint_text("/home/rodrigo/Documents").desired_width(280.0));
-                if widgets::button(ui, "Add", Kind::Secondary, 50.0).clicked() && !app.drive_input.trim().is_empty() {
-                    draft.drive_paths.push(app.drive_input.trim().to_string());
-                    app.drive_input.clear();
+                widgets::text(ui, "Folders are shared with the session as r365_1, r365_2, …", 11.0, t::TEXT_MUTED);
+                ui.add_space(6.0);
+                widgets::text(ui, "CONNECTION", 11.0, t::TEXT_MUTED);
+                ui.checkbox(&mut draft.auto_reconnect, "Reconnect automatically");
+                ui.checkbox(&mut draft.prevent_session_lock, "Keep the session from idling out");
+                ui.horizontal(|ui| {
+                    widgets::text(ui, "Graphics", 13.0, t::TEXT);
+                    egui::ComboBox::from_id_salt("gfx_mode").selected_text(draft.gfx_mode.label()).show_ui(ui, |ui| {
+                        for mode in [GfxMode::Avc420, GfxMode::Avc444, GfxMode::Off] {
+                            ui.selectable_value(&mut draft.gfx_mode, mode, mode.label());
+                        }
+                    });
+                });
+                ui.horizontal(|ui| {
+                    widgets::text(ui, "Network", 13.0, t::TEXT);
+                    egui::ComboBox::from_id_salt("network_profile").selected_text(draft.network_profile.label()).show_ui(ui, |ui| {
+                        for profile in [NetworkProfile::Auto, NetworkProfile::Lan, NetworkProfile::Wan, NetworkProfile::LowBandwidth] {
+                            ui.selectable_value(&mut draft.network_profile, profile, profile.label());
+                        }
+                    });
+                });
+                ui.checkbox(&mut draft.low_bandwidth_visuals, "Reduce visual effects (wallpaper, themes, animations)");
+                ui.checkbox(&mut draft.ignore_cert, "Ignore certificate errors");
+                ui.horizontal(|ui| {
+                    widgets::text(ui, "Refresh every", 13.0, t::TEXT);
+                    ui.add(egui::DragValue::new(&mut draft.auto_refresh_minutes).range(1..=240).suffix(" min"));
+                });
+                ui.add_space(6.0);
+                widgets::text(ui, "STARTUP", 11.0, t::TEXT_MUTED);
+                ui.checkbox(&mut draft.autostart, "Start R365 at login");
+                ui.add_enabled_ui(draft.autostart, |ui| {
+                    ui.checkbox(&mut draft.start_minimized, "Start minimized");
+                });
+                ui.checkbox(&mut draft.close_to_tray, "Keep running when the window is closed");
+                widgets::text(ui, "Launch r365 again to bring a hidden window back.", 11.0, t::TEXT_MUTED);
+                ui.add_space(6.0);
+                widgets::text(ui, "FREERDP", 11.0, t::TEXT_MUTED);
+                ui.add(
+                    egui::TextEdit::singleline(&mut draft.freerdp_path)
+                        .hint_text("Detect automatically, or a binary path, or \"flatpak\"")
+                        .desired_width(f32::INFINITY),
+                );
+                let detected = app.freerdp.as_ref().map(|f| f.display_name()).unwrap_or_else(|| "none detected".into());
+                widgets::text(ui, &format!("Detected: {detected}"), 11.0, t::TEXT_MUTED);
+                let mut extra = draft.extra_args.join(" ");
+                if ui.add(egui::TextEdit::singleline(&mut extra).hint_text("Extra FreeRDP arguments").desired_width(f32::INFINITY)).changed() {
+                    draft.extra_args = extra.split_whitespace().map(str::to_string).collect();
+                }
+                ui.add_space(4.0);
+            });
+            ui.add_space(8.0);
+            ui.separator();
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if widgets::button(ui, "Save", Kind::Primary, 90.0).clicked() {
+                    outcome = Some(true);
+                }
+                if widgets::button(ui, "Cancel", Kind::Ghost, 90.0).clicked() {
+                    outcome = Some(false);
                 }
             });
-            widgets::text(ui, "Folders are shared with the session as r365_1, r365_2, …", 11.0, t::TEXT_MUTED);
-            ui.add_space(6.0);
-            widgets::text(ui, "CONNECTION", 11.0, t::TEXT_MUTED);
-            ui.checkbox(&mut draft.auto_reconnect, "Reconnect automatically");
-            ui.checkbox(&mut draft.prevent_session_lock, "Keep the session from idling out");
-            ui.horizontal(|ui| {
-                widgets::text(ui, "Graphics", 13.0, t::TEXT);
-                egui::ComboBox::from_id_salt("gfx_mode").selected_text(draft.gfx_mode.label()).show_ui(ui, |ui| {
-                    for mode in [GfxMode::Avc420, GfxMode::Avc444, GfxMode::Off] {
-                        ui.selectable_value(&mut draft.gfx_mode, mode, mode.label());
-                    }
-                });
-            });
-            ui.horizontal(|ui| {
-                widgets::text(ui, "Network", 13.0, t::TEXT);
-                egui::ComboBox::from_id_salt("network_profile").selected_text(draft.network_profile.label()).show_ui(ui, |ui| {
-                    for profile in [NetworkProfile::Auto, NetworkProfile::Lan, NetworkProfile::Wan, NetworkProfile::LowBandwidth] {
-                        ui.selectable_value(&mut draft.network_profile, profile, profile.label());
-                    }
-                });
-            });
-            ui.checkbox(&mut draft.low_bandwidth_visuals, "Reduce visual effects (wallpaper, themes, animations)");
-            ui.checkbox(&mut draft.ignore_cert, "Ignore certificate errors");
-            ui.horizontal(|ui| {
-                widgets::text(ui, "Refresh every", 13.0, t::TEXT);
-                ui.add(egui::DragValue::new(&mut draft.auto_refresh_minutes).range(1..=240).suffix(" min"));
-            });
-            ui.add_space(6.0);
-            widgets::text(ui, "STARTUP", 11.0, t::TEXT_MUTED);
-            ui.checkbox(&mut draft.autostart, "Start R365 at login");
-            ui.add_enabled_ui(draft.autostart, |ui| {
-                ui.checkbox(&mut draft.start_minimized, "Start minimized");
-            });
-            ui.checkbox(&mut draft.close_to_tray, "Keep running when the window is closed");
-            widgets::text(ui, "Launch r365 again to bring a hidden window back.", 11.0, t::TEXT_MUTED);
-            ui.add_space(6.0);
-            widgets::text(ui, "FREERDP", 11.0, t::TEXT_MUTED);
-            ui.add(
-                egui::TextEdit::singleline(&mut draft.freerdp_path)
-                    .hint_text("Detect automatically, or a binary path, or \"flatpak\"")
-                    .desired_width(f32::INFINITY),
-            );
-            let detected = app.freerdp.as_ref().map(|f| f.display_name()).unwrap_or_else(|| "none detected".into());
-            widgets::text(ui, &format!("Detected: {detected}"), 11.0, t::TEXT_MUTED);
-            let mut extra = draft.extra_args.join(" ");
-            if ui.add(egui::TextEdit::singleline(&mut extra).hint_text("Extra FreeRDP arguments").desired_width(f32::INFINITY)).changed() {
-                draft.extra_args = extra.split_whitespace().map(str::to_string).collect();
-            }
-            ui.add_space(4.0);
         });
-        ui.add_space(8.0);
-        ui.separator();
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if widgets::button(ui, "Save", Kind::Primary, 90.0).clicked() {
-                outcome = Some(true);
-            }
-            if widgets::button(ui, "Cancel", Kind::Ghost, 90.0).clicked() {
-                outcome = Some(false);
-            }
-        });
-    });
     match outcome {
         Some(true) => app.save_settings(draft),
         Some(false) => {}
