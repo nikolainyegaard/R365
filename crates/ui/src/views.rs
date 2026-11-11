@@ -544,8 +544,8 @@ fn settings_window(app: &mut App, ctx: &egui::Context) {
                 ui.add_enabled_ui(draft.autostart, |ui| {
                     ui.checkbox(&mut draft.start_minimized, "Start minimized");
                 });
-                ui.checkbox(&mut draft.close_to_tray, "Keep running when the window is closed");
-                widgets::text(ui, "Launch r365 again to bring a hidden window back.", 11.0, t::TEXT_MUTED);
+                ui.checkbox(&mut draft.close_to_tray, "Hide instead of closing (keeps sessions running)");
+                widgets::text(ui, "Launch r365 again to reopen. Account menu → Quit R365 exits fully.", 11.0, t::TEXT_MUTED);
                 ui.add_space(6.0);
                 widgets::text(ui, "FREERDP", 11.0, t::TEXT_MUTED);
                 ui.add(

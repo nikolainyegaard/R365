@@ -260,6 +260,7 @@ impl App {
         }
         if self.config.close_to_tray && !self.force_quit && self.ctx.input(|i| i.viewport().close_requested()) {
             self.ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
             self.ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
         }
         if self.browser_launch.as_ref().is_some_and(|b| b.since.elapsed() >= TOKEN_WAIT) {
