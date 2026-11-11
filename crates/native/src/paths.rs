@@ -65,6 +65,11 @@ pub fn accounts_file() -> PathBuf {
     data_dir().join("accounts.json")
 }
 
+/// The app icon installed for desktop entries; rewritten on every start.
+pub fn icon_file() -> PathBuf {
+    data_dir().join("r365.png")
+}
+
 fn account_slug(account_id: &str) -> String {
     let slug: String =
         account_id.trim().chars().map(|c| if c.is_ascii_alphanumeric() || matches!(c, '@' | '.' | '_' | '-') { c } else { '_' }).take(120).collect();

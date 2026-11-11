@@ -19,8 +19,10 @@ pub fn apply(enabled: bool, minimized: bool) -> crate::Result<()> {
     }
     let exe = std::env::current_exe().map_err(|e| format!("Could not find the r365 executable: {e}"))?;
     let exec = exec_line(&exe.to_string_lossy(), minimized);
+    let icon = crate::paths::icon_file();
     let content = format!(
-        "[Desktop Entry]\nType=Application\nName=R365\nComment=Windows 365 and AVD client\nExec={exec}\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"
+        "[Desktop Entry]\nType=Application\nName=R365\nComment=Windows 365 and AVD client\nExec={exec}\nIcon={}\nTerminal=false\nX-GNOME-Autostart-enabled=true\n",
+        icon.to_string_lossy()
     );
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("Could not create {}: {e}", dir.display()))?;

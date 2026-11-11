@@ -25,6 +25,7 @@ fn main() -> eframe::Result {
         .with_inner_size([1050.0, 720.0])
         .with_min_inner_size([750.0, 550.0])
         .with_visible(!minimized);
+    let viewport = if let Some(icon) = app_icon() { viewport.with_icon(icon) } else { viewport };
     let options = eframe::NativeOptions { viewport, renderer: eframe::Renderer::Glow, centered: true, ..Default::default() };
     eframe::run_native(
         "R365",
@@ -38,6 +39,12 @@ fn main() -> eframe::Result {
 
 struct Shell {
     app: r365_ui::App,
+}
+
+fn app_icon() -> Option<egui::IconData> {
+    let image = image::load_from_memory(include_bytes!("../../../assets/r365.png")).ok()?.to_rgba8();
+    let (width, height) = image.dimensions();
+    Some(egui::IconData { rgba: image.into_raw(), width, height })
 }
 
 impl eframe::App for Shell {
