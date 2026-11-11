@@ -7,6 +7,7 @@ use std::process::{Command, Stdio};
 
 const SCHEME: &str = "x-scheme-handler/ms-appx-web";
 const DESKTOP: &str = "r365.desktop";
+const ICON: &[u8] = include_bytes!("../../../assets/r365-256.png");
 
 fn applications_dir() -> PathBuf {
     std::env::var_os("XDG_DATA_HOME")
@@ -23,9 +24,12 @@ fn applications_dir() -> PathBuf {
 /// Writes the desktop entry pointing at this executable and makes it the scheme's default.
 pub fn register() -> crate::Result<()> {
     let exe = std::env::current_exe().map_err(|e| format!("Could not find the r365 executable: {e}"))?;
+    let icon = crate::paths::icon_file();
+    let _ = crate::paths::write_private(&icon, ICON);
     let content = format!(
-        "[Desktop Entry]\nType=Application\nName=R365\nComment=Windows 365 and Azure Virtual Desktop client\nExec={} %u\nTerminal=false\nCategories=Network;RemoteAccess;\nMimeType={SCHEME};\nStartupWMClass=r365\n",
-        exe.to_string_lossy().replace(' ', "\\ ")
+        "[Desktop Entry]\nType=Application\nName=R365\nComment=Windows 365 and Azure Virtual Desktop client\nExec={} %u\nIcon={}\nTerminal=false\nCategories=Network;RemoteAccess;\nMimeType={SCHEME};\nStartupWMClass=r365\n",
+        exe.to_string_lossy().replace(' ', "\\ "),
+        icon.to_string_lossy()
     );
     let dir = applications_dir();
     std::fs::create_dir_all(&dir).map_err(|e| format!("Could not create {}: {e}", dir.display()))?;

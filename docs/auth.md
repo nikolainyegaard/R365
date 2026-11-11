@@ -32,11 +32,13 @@ It was the first choice: no redirect URI at all. Starting it works and polling r
 
 ## Everything after: refresh token
 
-`native::auth::ensure_fresh` is called before any feed request or session launch. If the access token expires within five minutes it POSTs the refresh token grant, stores the new set, and the caller adopts it through `Msg::Tokens`. If Microsoft does not return a new refresh token the old one is kept.
+`native::auth::ensure_fresh` is called before any feed request or session launch. It only refreshes when the stored access token has actually expired (`expires_at <= now`); a token that is still valid is reused. Feed discovery, feed fetch and `.rdp` download retry once with a freshly refreshed token after HTTP 401/403, so a token revoked early is replaced only when it fails. The new set is stored and the caller adopts it through `Msg::Tokens`. If Microsoft does not return a new refresh token the old one is kept.
 
 ## Storage
 
-`native::secret` stores the whole `TokenSet` as one JSON secret in the user keyring through `secret-tool` (attributes `service=r365 account=default`). If `secret-tool` is missing or fails, the set goes to `~/.local/share/r365/tokens.json` with mode 0600, and that file is deleted again the next time the keyring works. Sign out clears both.
+`native::secret` stores each account's whole `TokenSet` as one JSON secret in the user keyring through `secret-tool`, under `service=r365 account=<account-id>` where the id is the lowercased UPN plus the tenant that issued the id_token (see `core::account`). If `secret-tool` is missing or fails, the set goes to `~/.local/share/r365/tokens_<account-id>.json` with mode 0600, and that file is deleted again the next time the keyring works. Account metadata (id, UPN, display name) is kept in `accounts.json`; it contains no tokens. Signing one account out clears only that account's secret and cache.
+
+On first launch after upgrading from the single-account version, `native::secret::load_legacy` reads the old `service=r365 account=default` entry (or `tokens.json`), moves it to the account's new key, and the old `workspaces.json` cache is migrated the same way.
 
 ## Session auth for FreeRDP
 

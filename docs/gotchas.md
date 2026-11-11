@@ -8,6 +8,9 @@
 - **`script` merges stderr into stdout.** The direct-spawn fallback pipes stderr separately and drains it so FreeRDP never blocks on a full pipe.
 - **Never-crash lints are workspace-wide** (`[workspace.lints.clippy]` in the root Cargo.toml), with unwrap, expect, panic and indexing allowed in tests through `clippy.toml`. A new crate gets them by adding `[lints] workspace = true`.
 - **The device code grant dies at the finish line for this client ID.** Start and polling look fine; completion returns AADSTS7000218. Do not try it again; see docs/auth.md.
+- **Do not pin the audio rate or channel count.** Windows 365 often offers one 44.1 kHz PCM format; `/microphone:rate:48000` makes FreeRDP answer with zero formats and the mic never opens (`audin_process_open: invalid format index 0`). Leave negotiation to the host.
+- **Account ids are persisted in keyring attributes and file names.** They are the lowercased UPN plus the id_token tenant, sanitised in `core::account`. Changing that format orphans existing `tokens_<id>.json` files and keyring entries.
+- **Monitor ids are FreeRDP/SDL ids, not EDID or desktop indices.** R365 lists them with `sdl-freerdp3 /list:monitor`; `/monitors:<id>` is only honoured in fullscreen or multimonitor mode.
 - **FreeRDP's `/azure:avd-access` value is a printf format.** `%2F` would be parsed as a conversion. Double every percent sign.
 - **The desktop file points at the running binary's path.** A `cargo run` build registers `target/debug/r365`, a release build `target/release/r365`; whichever ran last owns the scheme. Harmless in development, and packaging will install a fixed path.
 - **egui and eframe come from a git pin, not crates.io,** for `Frame::request_activation_token`. Both must point at the same rev. Drop the pin when the next release ships it.

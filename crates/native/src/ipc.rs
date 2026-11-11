@@ -11,6 +11,11 @@ fn socket_path() -> PathBuf {
     std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).filter(|p| p.is_dir()).unwrap_or_else(std::env::temp_dir).join("r365.sock")
 }
 
+/// Whether another instance already holds the single-instance socket.
+pub fn is_running() -> bool {
+    UnixStream::connect(socket_path()).is_ok()
+}
+
 /// Delivers `url` to a running instance. False when none is listening.
 pub fn send_to_running(url: &str) -> bool {
     let Ok(mut stream) = UnixStream::connect(socket_path()) else { return false };

@@ -1892,6 +1892,7 @@ version = "0.1.0"
 dependencies = [
  "eframe",
  "egui",
+ "image",
  "r365-ui",
 ]
 

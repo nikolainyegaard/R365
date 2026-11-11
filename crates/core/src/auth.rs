@@ -273,9 +273,10 @@ impl TokenSet {
         Ok(TokenSet { access_token: resp.access_token, refresh_token, expires_at: now.saturating_add(resp.expires_in), claims })
     }
 
-    /// Refresh a few minutes early so a session launch never races expiry.
-    pub fn is_expiring_soon(&self, now: u64) -> bool {
-        self.expires_at <= now.saturating_add(300)
+    /// Refresh only once the access token has actually expired. The caller retries once on an
+    /// HTTP 401/403, so a token that is still accepted is not replaced early.
+    pub fn is_expired(&self, now: u64) -> bool {
+        self.expires_at <= now
     }
 }
 
@@ -333,7 +334,8 @@ mod tests {
         let set = TokenSet::from_response(resp, Some(&prev), 1000).unwrap();
         assert_eq!(set.refresh_token, "r1");
         assert_eq!(set.expires_at, 1060);
-        assert!(set.is_expiring_soon(1000));
+        assert!(!set.is_expired(1000));
+        assert!(set.is_expired(1060));
         let bare = TokenResponse { access_token: "new".into(), refresh_token: None, id_token: None, expires_in: 60 };
         assert!(TokenSet::from_response(bare, None, 0).is_err());
     }

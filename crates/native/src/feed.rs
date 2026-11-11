@@ -39,6 +39,12 @@ pub fn fetch_all(http: &Http, token: &str) -> crate::Result<Vec<Workspace>> {
     }
 }
 
+/// Whether a feed error means the access token was rejected, so a refresh-then-retry is worth
+/// trying, rather than a service or network failure.
+pub fn is_auth_error(message: &str) -> bool {
+    message.contains("HTTP 401") || message.contains("HTTP 403") || message.contains("rejected the sign-in token")
+}
+
 /// Downloads a resource's .rdp profile to the feed dir, owner-only, and returns its path.
 pub fn download_rdp(http: &Http, token: &str, rdp_url: &str, file_stem: &str) -> crate::Result<PathBuf> {
     let resp = http.get(rdp_url, Some(token), None, feed::MAX_RDP_BYTES)?;
@@ -50,23 +56,29 @@ pub fn download_rdp(http: &Http, token: &str, rdp_url: &str, file_stem: &str) ->
     Ok(path)
 }
 
-pub fn load_cache() -> Vec<Workspace> {
-    std::fs::read(crate::paths::workspaces_cache_file()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+pub fn load_cache(account_id: &str) -> Vec<Workspace> {
+    std::fs::read(crate::paths::workspaces_cache_file(account_id)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
-pub fn save_cache(workspaces: &[Workspace]) {
+pub fn save_cache(account_id: &str, workspaces: &[Workspace]) {
     if let Ok(json) = serde_json::to_vec(workspaces) {
-        let _ = crate::paths::write_private(&crate::paths::workspaces_cache_file(), &json);
+        let _ = crate::paths::write_private(&crate::paths::workspaces_cache_file(account_id), &json);
     }
 }
 
-pub fn clear_cache() {
-    let _ = std::fs::remove_file(crate::paths::workspaces_cache_file());
-    if let Ok(entries) = std::fs::read_dir(crate::paths::feed_dir()) {
-        for e in entries.flatten() {
-            let _ = std::fs::remove_file(e.path());
-        }
-    }
+/// Removes only this account's feed cache. Downloaded profiles live under the shared feed
+/// directory and are keyed by tenant and resource, so another account may still be using them.
+pub fn clear_cache(account_id: &str) {
+    let _ = std::fs::remove_file(crate::paths::workspaces_cache_file(account_id));
+}
+
+/// The pre-multi-account cache (`workspaces.json`); read once and migrated.
+pub fn load_cache_legacy() -> Vec<Workspace> {
+    std::fs::read(crate::paths::legacy_workspaces_cache_file()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+}
+
+pub fn clear_cache_legacy() {
+    let _ = std::fs::remove_file(crate::paths::legacy_workspaces_cache_file());
 }
 
 pub fn feed_dir() -> PathBuf {
@@ -75,4 +87,18 @@ pub fn feed_dir() -> PathBuf {
 
 pub fn is_under_feed_dir(p: &Path) -> bool {
     p.starts_with(crate::paths::feed_dir())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auth_errors_are_recognised() {
+        assert!(is_auth_error("Feed for Contoso failed with HTTP 401"));
+        assert!(is_auth_error("Downloading the remote desktop profile failed with HTTP 403"));
+        assert!(is_auth_error("Microsoft rejected the sign-in token for the workspace feed. Sign out and in again."));
+        assert!(!is_auth_error("Feed for Contoso failed with HTTP 500"));
+        assert!(!is_auth_error("network is unreachable"));
+    }
 }

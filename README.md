@@ -4,6 +4,13 @@ A Rust client for Windows 365 Cloud PCs and Azure Virtual Desktop on Linux. Smal
 
 R365 signs you in to Entra ID through your own browser, lists the Cloud PCs and apps published to you, and runs FreeRDP 3 for the session.
 
+- Multiple Microsoft work accounts, including different companies. Each has its own tokens, cached workspaces and sessions; switch from the header.
+- Choose one monitor for fullscreen, several to span, or all/current monitors; the settings dialog scrolls on small screens.
+- Audio output and microphone pickers, shared folders, camera toggle, and one-way or two-way clipboard.
+- Graphics and network profiles, reduced visual effects for slow links, and a per-resource default display mode.
+- Start at login, start minimized, and keep R365 running when the window is closed.
+- Sound and microphone redirection through PulseAudio/PipeWire. R365 lets the host negotiate the audio format instead of pinning a rate the Cloud PC may not offer.
+
 ## Requirements
 
 - FreeRDP 3 (`freerdp` package, or the `com.freerdp.FreeRDP` Flatpak)

@@ -42,12 +42,38 @@ pub fn config_file() -> PathBuf {
     config_dir().join("config.json")
 }
 
-pub fn workspaces_cache_file() -> PathBuf {
+pub fn workspaces_cache_file(account_id: &str) -> PathBuf {
+    data_dir().join(format!("workspaces_{}.json", account_slug(account_id)))
+}
+
+/// The single-account file from before multi-account support; read once and migrated.
+pub fn legacy_workspaces_cache_file() -> PathBuf {
     data_dir().join("workspaces.json")
 }
 
-pub fn token_fallback_file() -> PathBuf {
+pub fn token_fallback_file(account_id: &str) -> PathBuf {
+    data_dir().join(format!("tokens_{}.json", account_slug(account_id)))
+}
+
+/// The single-account fallback file from before multi-account support.
+pub fn legacy_token_fallback_file() -> PathBuf {
     data_dir().join("tokens.json")
+}
+
+/// Metadata for the saved accounts. Tokens stay in the keyring or the per-account fallback.
+pub fn accounts_file() -> PathBuf {
+    data_dir().join("accounts.json")
+}
+
+/// The app icon installed for desktop entries; rewritten on every start.
+pub fn icon_file() -> PathBuf {
+    data_dir().join("r365.png")
+}
+
+fn account_slug(account_id: &str) -> String {
+    let slug: String =
+        account_id.trim().chars().map(|c| if c.is_ascii_alphanumeric() || matches!(c, '@' | '.' | '_' | '-') { c } else { '_' }).take(120).collect();
+    if slug.is_empty() { "default".into() } else { slug }
 }
 
 /// Writes owner-only, via a temp file and rename so a crash never leaves a half-written file.

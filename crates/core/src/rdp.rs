@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DisplayMode {
     Default,
     Fullscreen,
@@ -11,18 +11,113 @@ pub enum DisplayMode {
     MultiMonitor,
 }
 
+impl DisplayMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Default => "Use settings",
+            Self::Fullscreen => "Fullscreen",
+            Self::Windowed => "Windowed",
+            Self::MultiMonitor => "All monitors",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ClipboardMode {
+    #[default]
+    Both,
+    Off,
+    LocalToRemote,
+    RemoteToLocal,
+}
+
+impl ClipboardMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Both => "Both directions",
+            Self::Off => "Off",
+            Self::LocalToRemote => "Local → remote",
+            Self::RemoteToLocal => "Remote → local",
+        }
+    }
+
+    pub fn enabled(self) -> bool {
+        self != Self::Off
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum GfxMode {
+    #[default]
+    Avc420,
+    Avc420Standard,
+    Avc444,
+    RemoteFx,
+    Off,
+}
+
+impl GfxMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Avc420 => "AVC420 progressive",
+            Self::Avc420Standard => "AVC420 standard",
+            Self::Avc444 => "AVC444 (best colors)",
+            Self::RemoteFx => "RemoteFX",
+            Self::Off => "Off (server bitmap)",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum NetworkProfile {
+    #[default]
+    Auto,
+    Lan,
+    Wan,
+    LowBandwidth,
+}
+
+impl NetworkProfile {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Auto => "Auto",
+            Self::Lan => "LAN / fast",
+            Self::Wan => "WAN",
+            Self::LowBandwidth => "Low bandwidth",
+        }
+    }
+
+    pub fn arg(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Lan => "lan",
+            Self::Wan => "wan",
+            Self::LowBandwidth => "broadband-low",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LaunchOptions {
     pub fullscreen: bool,
     pub multi_monitor: bool,
+    /// FreeRDP monitor ids selected for fullscreen. Empty means the current/primary monitor (or
+    /// every monitor when `multi_monitor` is set).
+    pub monitors: Vec<u32>,
     pub scale_percent: u32,
     pub sound: bool,
     pub microphone: bool,
+    pub sound_device: String,
+    pub microphone_device: String,
+    pub camera: bool,
     pub usb_redirection: bool,
     pub smartcard: bool,
-    pub clipboard: bool,
+    pub clipboard_mode: ClipboardMode,
+    pub drive_paths: Vec<String>,
     pub dynamic_resolution: bool,
-    pub gfx_progressive: bool,
+    pub gfx_mode: GfxMode,
+    pub network_profile: NetworkProfile,
+    pub low_bandwidth_visuals: bool,
     pub async_channels: bool,
     pub auto_reconnect: bool,
     pub prevent_session_lock: bool,
@@ -43,13 +138,23 @@ pub fn prepare_profile(contents: &str, opts: &LaunchOptions) -> String {
             "redirectsmartcards" if !opts.smartcard => Some("redirectsmartcards:i:0"),
             "usbdevicestoredirect" if !opts.usb_redirection => Some("usbdevicestoredirect:s:"),
             "devicestoredirect" if !opts.usb_redirection => Some("devicestoredirect:s:"),
-            "redirectclipboard" if !opts.clipboard => Some("redirectclipboard:i:0"),
+            "camerastoredirect" if !opts.camera => Some("camerastoredirect:s:"),
+            "redirectclipboard" if !opts.clipboard_mode.enabled() => Some("redirectclipboard:i:0"),
             _ => None,
         };
         out.push_str(replacement.unwrap_or(line));
         out.push_str("\r\n");
     }
     out
+}
+
+fn audio_arg(kind: &str, device: &str) -> String {
+    let device = device.trim();
+    if device.is_empty() || device.contains([',', '\0', '\n', '\r']) {
+        format!("/{kind}:sys:pulse")
+    } else {
+        format!("/{kind}:sys:pulse,dev:{device}")
+    }
 }
 
 /// Arguments after the FreeRDP binary. The .rdp file comes first, as FreeRDP requires.
@@ -72,11 +177,24 @@ pub fn build_args(rdp_file: &str, username: &str, title: &str, opts: &LaunchOpti
     if !username.trim().is_empty() {
         a.push(format!("/u:{username}"));
     }
+    // Do not pin rate/channel. Windows 365 hosts commonly publish a single 44.1 kHz PCM
+    // format; forcing 48 kHz leaves FreeRDP with zero matching formats, so the microphone
+    // never opens (FreeRDP #14137 / #14146). Let the server negotiate.
     if opts.sound {
-        a.push("/sound:sys:pulse,rate:48000,channel:2,quality:high".into());
+        a.push(audio_arg("sound", &opts.sound_device));
     }
     if opts.microphone {
-        a.push("/microphone:sys:pulse,rate:48000".into());
+        a.push(audio_arg("microphone", &opts.microphone_device));
+    }
+    for (index, path) in opts.drive_paths.iter().enumerate() {
+        let path = path.trim();
+        if path.is_empty() {
+            continue;
+        }
+        if path.contains([',', '\0', '\n', '\r']) {
+            return Err(format!("Shared folder path cannot contain a comma or control character: {path}"));
+        }
+        a.push(format!("/drive:r365_{},{path}", index + 1));
     }
     if opts.usb_redirection {
         a.push("/usb:auto".into());
@@ -91,22 +209,41 @@ pub fn build_args(rdp_file: &str, username: &str, title: &str, opts: &LaunchOpti
     } else if opts.fullscreen {
         a.push("/f".into());
     }
+    if whole_screen && !opts.monitors.is_empty() {
+        if opts.monitors.len() > 1 && !opts.multi_monitor {
+            a.push("/multimon:force".into());
+        }
+        let ids = opts.monitors.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
+        a.push(format!("/monitors:{ids}"));
+    }
     if opts.scale_percent > 0 && !whole_screen {
         a.push(format!("/scale-desktop:{}", opts.scale_percent));
     }
     if opts.ignore_cert {
         a.push("/cert:ignore".into());
     }
-    if opts.clipboard {
-        a.push("+clipboard".into());
+    match opts.clipboard_mode {
+        ClipboardMode::Off => a.push("-clipboard".into()),
+        ClipboardMode::Both => a.push("+clipboard".into()),
+        ClipboardMode::LocalToRemote => a.push("/clipboard:direction-to:remote,files-to:remote".into()),
+        ClipboardMode::RemoteToLocal => a.push("/clipboard:direction-to:local,files-to:local".into()),
     }
     if opts.dynamic_resolution && !whole_screen {
         a.push("+dynamic-resolution".into());
     }
-    a.push("/network:auto".into());
+    a.push(format!("/network:{}", opts.network_profile.arg()));
     a.push("+compression".into());
-    a.push("+fonts".into());
-    a.push("+aero".into());
+    if opts.low_bandwidth_visuals {
+        a.push("-fonts".into());
+        a.push("-aero".into());
+        a.push("-wallpaper".into());
+        a.push("-themes".into());
+        a.push("-window-drag".into());
+        a.push("-menu-anims".into());
+    } else {
+        a.push("+fonts".into());
+        a.push("+aero".into());
+    }
     if opts.async_channels {
         a.push("+async-channels".into());
     }
@@ -117,9 +254,24 @@ pub fn build_args(rdp_file: &str, username: &str, title: &str, opts: &LaunchOpti
     if opts.prevent_session_lock && !opts.extra_args.iter().any(|x| x == "/prevent-session-lock" || x.starts_with("/prevent-session-lock:")) {
         a.push("/prevent-session-lock:120".into());
     }
-    if opts.gfx_progressive {
-        a.push("/gfx:AVC420,progressive".into());
-        a.push("+rfx".into());
+    match opts.gfx_mode {
+        GfxMode::Avc420 => {
+            a.push("/gfx:AVC420,progressive".into());
+            a.push("+rfx".into());
+        }
+        GfxMode::Avc420Standard => {
+            a.push("/gfx:AVC420".into());
+            a.push("+rfx".into());
+        }
+        GfxMode::Avc444 => {
+            a.push("/gfx:AVC444".into());
+            a.push("+rfx".into());
+        }
+        GfxMode::RemoteFx => {
+            a.push("/gfx:RFX".into());
+            a.push("+rfx".into());
+        }
+        GfxMode::Off => a.push("-gfx".into()),
     }
     a.push("/gdi:sw".into());
     a.push("/bpp:32".into());
@@ -249,14 +401,21 @@ mod tests {
         LaunchOptions {
             fullscreen: false,
             multi_monitor: false,
+            monitors: vec![],
             scale_percent: 125,
             sound: true,
             microphone: false,
+            sound_device: String::new(),
+            microphone_device: String::new(),
+            camera: true,
             usb_redirection: false,
             smartcard: false,
-            clipboard: true,
+            clipboard_mode: ClipboardMode::Both,
+            drive_paths: vec![],
             dynamic_resolution: true,
-            gfx_progressive: true,
+            gfx_mode: GfxMode::Avc420,
+            network_profile: NetworkProfile::Auto,
+            low_bandwidth_visuals: false,
             async_channels: true,
             auto_reconnect: true,
             prevent_session_lock: true,
@@ -286,6 +445,84 @@ mod tests {
         assert!(!a.iter().any(|s| s.starts_with("/u:")));
         o.extra_args = vec!["bad\narg".into()];
         assert!(build_args("x", "", "PC", &o, None).is_err());
+    }
+
+    #[test]
+    fn audio_args_negotiate_server_formats() {
+        let mut o = opts();
+        o.microphone = true;
+        let a = build_args("x", "", "PC", &o, None).unwrap();
+        assert!(a.contains(&"/sound:sys:pulse".to_string()));
+        assert!(a.contains(&"/microphone:sys:pulse".to_string()));
+        assert!(!a.iter().any(|s| s.starts_with("/sound:") && s.contains("rate:")));
+        assert!(!a.iter().any(|s| s.starts_with("/microphone:") && s.contains("rate:")));
+    }
+
+    #[test]
+    fn monitor_selection_is_passed_through() {
+        let mut o = opts();
+        o.fullscreen = true;
+        o.monitors = vec![3];
+        let a = build_args("x", "", "PC", &o, None).unwrap();
+        assert!(a.contains(&"/f".to_string()));
+        assert!(a.contains(&"/monitors:3".to_string()));
+        assert!(!a.contains(&"/multimon:force".to_string()));
+        o.monitors = vec![3, 4];
+        let a = build_args("x", "", "PC", &o, None).unwrap();
+        assert!(a.contains(&"/monitors:3,4".to_string()));
+        assert!(a.contains(&"/multimon:force".to_string()));
+        o.fullscreen = false;
+        o.monitors = vec![3];
+        let a = build_args("x", "", "PC", &o, None).unwrap();
+        assert!(!a.iter().any(|s| s.starts_with("/monitors:")));
+    }
+
+    #[test]
+    fn device_and_quality_args() {
+        let mut o = opts();
+        o.microphone = true;
+        o.sound_device = "sink.one".into();
+        o.microphone_device = "source.one".into();
+        o.clipboard_mode = ClipboardMode::LocalToRemote;
+        o.drive_paths = vec!["/home/me/Documents".into()];
+        o.gfx_mode = GfxMode::Avc444;
+        o.network_profile = NetworkProfile::LowBandwidth;
+        o.low_bandwidth_visuals = true;
+        let a = build_args("x", "", "PC", &o, None).unwrap();
+        assert!(a.contains(&"/sound:sys:pulse,dev:sink.one".to_string()));
+        assert!(a.contains(&"/microphone:sys:pulse,dev:source.one".to_string()));
+        assert!(a.contains(&"/clipboard:direction-to:remote,files-to:remote".to_string()));
+        assert!(a.contains(&"/drive:r365_1,/home/me/Documents".to_string()));
+        assert!(a.contains(&"/gfx:AVC444".to_string()));
+        assert!(a.contains(&"/network:broadband-low".to_string()));
+        assert!(a.contains(&"-wallpaper".to_string()));
+        assert!(!a.contains(&"+aero".to_string()));
+        o.drive_paths = vec!["/tmp/a,b".into()];
+        assert!(build_args("x", "", "PC", &o, None).is_err());
+    }
+
+    #[test]
+    fn alternative_graphics_modes() {
+        let mut o = opts();
+        o.gfx_mode = GfxMode::Avc420Standard;
+        let a = build_args("x", "", "PC", &o, None).unwrap();
+        assert!(a.contains(&"/gfx:AVC420".to_string()));
+        assert!(!a.contains(&"/gfx:AVC420,progressive".to_string()));
+        o.gfx_mode = GfxMode::RemoteFx;
+        let a = build_args("x", "", "PC", &o, None).unwrap();
+        assert!(a.contains(&"/gfx:RFX".to_string()));
+        o.gfx_mode = GfxMode::Off;
+        let a = build_args("x", "", "PC", &o, None).unwrap();
+        assert!(a.contains(&"-gfx".to_string()));
+    }
+
+    #[test]
+    fn devices_switch_off_in_the_profile() {
+        let mut o = opts();
+        o.camera = false;
+        o.clipboard_mode = ClipboardMode::Off;
+        let out = prepare_profile("camerastoredirect:s:*\r\nredirectclipboard:i:1\r\n", &o);
+        assert_eq!(out, "camerastoredirect:s:\r\nredirectclipboard:i:0\r\n");
     }
 
     #[test]
