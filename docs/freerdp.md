@@ -17,7 +17,7 @@ The access token R365 holds for the AVD gateway scope goes to FreeRDP as `/gatew
 
 Audio and microphone use the Pulse backend without a fixed rate or channel count. Pinning 48 kHz makes FreeRDP advertise zero matching formats when the host offers only 44.1 kHz PCM (common on Windows 11), which silently disables the microphone; see FreeRDP #14137 and #14146.
 
-Device and quality settings map to FreeRDP's own switches: `/sound:...,dev:`, `/microphone:...,dev:`, `/drive:<name>,<path>`, `/clipboard:direction-to:...,files-to:...`, `/gfx:AVC420|AVC444`, `/network:<profile>`, and the negative `-wallpaper`, `-themes`, `-aero`, `-window-drag`, `-menu-anims`, `-fonts` switches for reduced visual effects. Camera redirection is disabled by rewriting `camerastoredirect:s:` to an empty value in the downloaded `.rdp`.
+Device and quality settings map to FreeRDP's own switches: `/sound:...,dev:`, `/microphone:...,dev:`, `/drive:<name>,<path>`, `/clipboard:direction-to:...,files-to:...`, `/gfx:AVC420|AVC444|RFX`, `/network:<profile>`, and the negative `-wallpaper`, `-themes`, `-aero`, `-window-drag`, `-menu-anims`, `-fonts` switches for reduced visual effects. Camera redirection is disabled by rewriting `camerastoredirect:s:` to an empty value in the downloaded `.rdp`.
 
 The downloaded `.rdp` is rewritten by `core::rdp::prepare_profile` into `<name>.active.rdp`: smartcard, USB and clipboard lines are zeroed when the setting is off, which stops FreeRDP polling an absent smartcard service (`SCARD_E_NO_SERVICE` loops).
 

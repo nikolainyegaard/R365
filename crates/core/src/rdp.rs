@@ -50,7 +50,9 @@ impl ClipboardMode {
 pub enum GfxMode {
     #[default]
     Avc420,
+    Avc420Standard,
     Avc444,
+    RemoteFx,
     Off,
 }
 
@@ -58,8 +60,10 @@ impl GfxMode {
     pub fn label(self) -> &'static str {
         match self {
             Self::Avc420 => "AVC420 progressive",
-            Self::Avc444 => "AVC444",
-            Self::Off => "Off",
+            Self::Avc420Standard => "AVC420 standard",
+            Self::Avc444 => "AVC444 (best colors)",
+            Self::RemoteFx => "RemoteFX",
+            Self::Off => "Off (server bitmap)",
         }
     }
 }
@@ -255,8 +259,16 @@ pub fn build_args(rdp_file: &str, username: &str, title: &str, opts: &LaunchOpti
             a.push("/gfx:AVC420,progressive".into());
             a.push("+rfx".into());
         }
+        GfxMode::Avc420Standard => {
+            a.push("/gfx:AVC420".into());
+            a.push("+rfx".into());
+        }
         GfxMode::Avc444 => {
             a.push("/gfx:AVC444".into());
+            a.push("+rfx".into());
+        }
+        GfxMode::RemoteFx => {
+            a.push("/gfx:RFX".into());
             a.push("+rfx".into());
         }
         GfxMode::Off => a.push("-gfx".into()),
@@ -487,6 +499,21 @@ mod tests {
         assert!(!a.contains(&"+aero".to_string()));
         o.drive_paths = vec!["/tmp/a,b".into()];
         assert!(build_args("x", "", "PC", &o, None).is_err());
+    }
+
+    #[test]
+    fn alternative_graphics_modes() {
+        let mut o = opts();
+        o.gfx_mode = GfxMode::Avc420Standard;
+        let a = build_args("x", "", "PC", &o, None).unwrap();
+        assert!(a.contains(&"/gfx:AVC420".to_string()));
+        assert!(!a.contains(&"/gfx:AVC420,progressive".to_string()));
+        o.gfx_mode = GfxMode::RemoteFx;
+        let a = build_args("x", "", "PC", &o, None).unwrap();
+        assert!(a.contains(&"/gfx:RFX".to_string()));
+        o.gfx_mode = GfxMode::Off;
+        let a = build_args("x", "", "PC", &o, None).unwrap();
+        assert!(a.contains(&"-gfx".to_string()));
     }
 
     #[test]

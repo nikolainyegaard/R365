@@ -519,7 +519,7 @@ fn settings_window(app: &mut App, ctx: &egui::Context) {
                 ui.horizontal(|ui| {
                     widgets::text(ui, "Graphics", 13.0, t::TEXT);
                     egui::ComboBox::from_id_salt("gfx_mode").selected_text(draft.gfx_mode.label()).show_ui(ui, |ui| {
-                        for mode in [GfxMode::Avc420, GfxMode::Avc444, GfxMode::Off] {
+                        for mode in [GfxMode::Avc420, GfxMode::Avc420Standard, GfxMode::Avc444, GfxMode::RemoteFx, GfxMode::Off] {
                             ui.selectable_value(&mut draft.gfx_mode, mode, mode.label());
                         }
                     });

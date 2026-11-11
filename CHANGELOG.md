@@ -14,7 +14,7 @@ All notable changes to this project are documented here. The format follows Keep
 - Audio output and microphone pickers backed by PulseAudio/PipeWire
 - Shared local folders as redirected drives
 - Camera on/off, clipboard direction (both, off, or one way)
-- Graphics profile (AVC420/AVC444/off), network profile (auto/LAN/WAN/low bandwidth) and a reduce-visual-effects switch
+- Graphics profile (AVC420 progressive/standard, AVC444, RemoteFX, or off), network profile (auto/LAN/WAN/low bandwidth) and a reduce-visual-effects switch
 - Start at login, start minimized, and keep running when the window is closed
 - Per-resource default display mode from the card context menu
 - The settings dialog scrolls, so every section stays reachable on smaller screens
